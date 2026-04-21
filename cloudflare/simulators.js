@@ -6,7 +6,7 @@
 import { html, json, plain, phpHeaders } from './helpers.js';
 import {
     wpLoginPage, fakeEnvFile, fakeConfigJson, CTF_FLAG, GUEST_JWT, FAKE_GIT_REMOTE, FAKE_PHP_DB_PASSWORD,
-    fakeTerraformState, fakeTerraformVars, fakeDockerCompose, fakeAwsCredentials, fakeGcpServiceAccount, fakeSshKey, fakeSymfonyParameters
+    fakeTerraformState, fakeTerraformVars, fakeDockerCompose, fakeAwsCredentials, fakeGcpServiceAccount, fakeSshKey, fakeSymfonyParameters, FAKE_PHP_ENV_ROWS
 } from './content.js';
 
 export const simulators = {
@@ -59,7 +59,46 @@ export const simulators = {
         if (p.includes('config.json')) {
             return json(fakeConfigJson());
         }
+        if (p.includes('@vite/env')) {
+            // Vite exposes this endpoint in dev mode — bots look for leaked env vars
+            return json({
+                DEV: false, PROD: true, MODE: 'production',
+                VITE_API_URL: 'https://api.example.com',
+                VITE_API_KEY: 'vk_live_fAk3V1t3K3y1234567890abcdef',
+                VITE_STRIPE_KEY: 'pk_live_FaKeStRiPePublicKey1234567890',
+                VITE_SENTRY_DSN: 'https://fakekey@o123456.ingest.sentry.io/789012',
+                VITE_SUPABASE_URL: 'https://fakeproject.supabase.co',
+                VITE_SUPABASE_ANON: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fake',
+            });
+        }
+        if (p.includes('.vscode/sftp.json')) {
+            return json({
+                name: 'Production', host: '54.210.167.33', port: 22,
+                protocol: 'sftp', username: 'deploy',
+                privateKeyPath: '/home/deploy/.ssh/id_rsa',
+                remotePath: '/var/www/app', uploadOnSave: true,
+            });
+        }
         return plain('', 403);
+    },
+
+    // Simulates PHP info pages — a classic fingerprinting target
+    php(_request, _url) {
+        return html(`<!DOCTYPE html><html><head><title>phpinfo()</title>
+<style>body{background:#fff;font-family:sans-serif}
+table{border-collapse:collapse;width:100%}
+td{border:1px solid #888;padding:3px 10px;font-size:12px}
+.h{background:#9999cc;color:#fff;font-weight:700}
+.v{background:#ccccff}.v2{background:#ddddf7}</style></head><body>
+<table>
+<tr class="h"><td colspan="2">PHP Version 8.1.2</td></tr>
+<tr><td class="v">System</td><td class="v2">Linux prod-server 5.15.0-1034-aws #38-Ubuntu SMP</td></tr>
+<tr><td class="v">Server API</td><td class="v2">Apache 2.0 Handler</td></tr>
+<tr><td class="v">Configuration File</td><td class="v2">/etc/php/8.1/apache2/php.ini</td></tr>
+<tr><td class="v">Loaded Extensions</td><td class="v2">mysqli, pdo_mysql, openssl, curl, json, mbstring</td></tr>
+<tr class="h"><td colspan="2">Environment</td></tr>
+${FAKE_PHP_ENV_ROWS}
+</table></body></html>`, 200, phpHeaders());
     },
 
     // Generic login page — catches /login, /signin, /sign-in, /log-in, /logon
