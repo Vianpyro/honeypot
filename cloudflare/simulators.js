@@ -219,6 +219,86 @@ export const simulators = {
         });
     },
 
+    // Simulates a webmail server — Roundcube is the most common target
+    mail(request, url) {
+        const p = url.pathname;
+        if (p.includes('roundcube') || p === '/webmail' || p === '/mail' || p === '/') {
+            if (request.method === 'POST') {
+                return json({ status: 'error', message: 'Login failed. Invalid username or password.' }, 401);
+            }
+            return html(`<!DOCTYPE html><html><head><title>Roundcube Webmail</title></head><body>
+<div style="max-width:340px;margin:60px auto;font-family:sans-serif">
+  <h2 style="color:#333">Roundcube Webmail</h2>
+  <form method="post">
+    <p><label>Username<br><input type="text" name="_user" style="width:100%;padding:.4rem"/></label></p>
+    <p><label>Password<br><input type="password" name="_pass" style="width:100%;padding:.4rem"/></label></p>
+    <p><input type="submit" value="Login" style="background:#005b99;color:#fff;border:none;padding:.5rem 1.5rem;cursor:pointer"/></p>
+  </form>
+</div></body></html>`, 200, { Server: 'Apache/2.4.41 (Ubuntu)', 'X-Powered-By': 'PHP/8.1.2' });
+        }
+        if (p.includes('autodiscover') || p.includes('owa') || p.includes('exchange')) {
+            return html(`<!DOCTYPE html><html><head><title>Outlook Web Access</title></head><body>
+<div style="max-width:340px;margin:60px auto;font-family:sans-serif">
+  <h2>Outlook Web Access</h2>
+  <form method="post">
+    <p><label>Domain\\Username<br><input type="text" name="username" style="width:100%;padding:.4rem"/></label></p>
+    <p><label>Password<br><input type="password" name="password" style="width:100%;padding:.4rem"/></label></p>
+    <p><input type="submit" value="Sign in" style="background:#0078d4;color:#fff;border:none;padding:.5rem 1.5rem;cursor:pointer"/></p>
+  </form>
+</div></body></html>`, 200, { Server: 'Microsoft-IIS/10.0', 'X-Powered-By': 'ASP.NET' });
+        }
+        return plain('', 404);
+    },
+
+    // Simulates a VPN login portal — covers Cisco, Fortinet, Palo Alto, Citrix
+    vpn(request, url) {
+        const p = url.pathname;
+        if (request.method === 'POST') {
+            return json({ status: 'failed', message: 'Authentication failed. Invalid credentials.' }, 401);
+        }
+        if (p.includes('fortivpn') || p.includes('remote')) {
+            return html(`<!DOCTYPE html><html><head><title>FortiGate SSL VPN</title></head><body>
+<div style="max-width:340px;margin:60px auto;font-family:sans-serif">
+  <h2 style="color:#c0392b">FortiGate SSL VPN</h2>
+  <form method="post">
+    <p><label>Username<br><input type="text" name="username" style="width:100%;padding:.4rem"/></label></p>
+    <p><label>Password<br><input type="password" name="credential" style="width:100%;padding:.4rem"/></label></p>
+    <p><input type="submit" value="Sign In" style="background:#c0392b;color:#fff;border:none;padding:.5rem 1.5rem;cursor:pointer"/></p>
+  </form>
+</div></body></html>`, 200, { Server: 'xxxxxxxx-xxxxx', 'X-Frame-Options': 'SAMEORIGIN' });
+        }
+        // Default: Cisco AnyConnect
+        return html(`<!DOCTYPE html><html><head><title>Cisco AnyConnect</title></head><body>
+<div style="max-width:340px;margin:60px auto;font-family:sans-serif">
+  <h2 style="color:#049fd9">Cisco AnyConnect Secure Mobility</h2>
+  <form method="post" action="/+webvpn+/index.html">
+    <p><label>Username<br><input type="text" name="username" style="width:100%;padding:.4rem"/></label></p>
+    <p><label>Password<br><input type="password" name="password" style="width:100%;padding:.4rem"/></label></p>
+    <p><input type="submit" value="Login" style="background:#049fd9;color:#fff;border:none;padding:.5rem 1.5rem;cursor:pointer"/></p>
+  </form>
+</div></body></html>`, 200, { Server: 'Cisco HTTP Server' });
+    },
+
+    // Simulates a CDN / object storage endpoint — returns plausible-looking asset listings
+    cdn(_request, url) {
+        const p = url.pathname;
+        // Simulate an open S3-style bucket listing
+        if (p === '/files' || p === '/storage' || p === '/s3' || p === '/') {
+            return plain(
+                `<?xml version="1.0" encoding="UTF-8"?>\n` +
+                `<ListBucketResult>\n  <Name>my-app-prod-bucket</Name>\n  <Prefix></Prefix>\n` +
+                `  <Contents><Key>uploads/avatar_1.jpg</Key><Size>24601</Size></Contents>\n` +
+                `  <Contents><Key>uploads/backup_2024.sql.gz</Key><Size>1048576</Size></Contents>\n` +
+                `  <Contents><Key>private/config.env</Key><Size>512</Size></Contents>\n` +
+                `  <Contents><Key>private/id_rsa</Key><Size>3247</Size></Contents>\n` +
+                `</ListBucketResult>`,
+                200, { 'Content-Type': 'application/xml', Server: 'AmazonS3' }
+            );
+        }
+        // Simulate a 403 for direct asset access — realistic CDN behaviour
+        return plain('Access Denied', 403, { Server: 'AmazonS3' });
+    },
+
     'catch-all'(_request, _url) {
         return html(`<!DOCTYPE html><html><head><title>404 Not Found</title></head>
 <body><h1>Not Found</h1><p>The requested URL was not found on this server.</p>
