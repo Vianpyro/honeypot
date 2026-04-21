@@ -6,7 +6,8 @@
 import { html, json, plain, phpHeaders } from './helpers.js';
 import {
     wpLoginPage, fakeEnvFile, fakeConfigJson, CTF_FLAG, GUEST_JWT, FAKE_GIT_REMOTE, FAKE_PHP_DB_PASSWORD,
-    fakeTerraformState, fakeTerraformVars, fakeDockerCompose, fakeAwsCredentials, fakeGcpServiceAccount, fakeSshKey, fakeSymfonyParameters, FAKE_PHP_ENV_ROWS
+    fakeTerraformState, fakeTerraformVars, fakeDockerCompose, fakeAwsCredentials, fakeGcpServiceAccount,
+    fakeSshKey, fakeSymfonyParameters, FAKE_PHP_ENV_ROWS, fakeJsConfig
 } from './content.js';
 
 export const simulators = {
@@ -37,7 +38,7 @@ export const simulators = {
 
     sensitive(_request, url) {
         const p = url.pathname;
-        if (p.includes('.env')) {
+        if (p.includes('.env') || p === '/env') {
             return plain(fakeEnvFile(), 200);
         }
         if (p.includes('.git/config')) {
@@ -58,6 +59,9 @@ export const simulators = {
         }
         if (p.includes('config.json')) {
             return json(fakeConfigJson());
+        }
+        if (p.includes('js/config.js')) {
+            return plain(fakeJsConfig(), 200, { 'Content-Type': 'application/javascript' });
         }
         if (p.includes('@vite/env')) {
             // Vite exposes this endpoint in dev mode — bots look for leaked env vars

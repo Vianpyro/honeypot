@@ -13,7 +13,7 @@ const SIMULATORS = [
     // {1,2} allows double-slash paths like //sito/wp-includes/wlwmanifest.xml
     { label: 'wordpress', pattern: /^\/{1,2}(wp-admin|wp-login\.php|xmlrpc\.php|wp-json|wp-content|wp-includes)/ },
     { label: 'phpmyadmin', pattern: /^\/(phpmyadmin|pma|phpMyAdmin)/ },
-    { label: 'sensitive', pattern: /^\/(\.env|\.git\/config|config\.php|\.htpasswd|web\.config|\.DS_Store|src\/\.env|config\.env|config\.json|\.env\.(local|production|prod|dev|staging)|@vite\/env|\.vscode\/sftp\.json)/ },
+    { label: 'sensitive', pattern: /^\/(\.env|api\/\.env|env$|\.git\/config|config\.php|\.htpasswd|web\.config|\.DS_Store|src\/\.env|config\.env|config\.json|\.env\.(local|production|prod|dev|staging|development|backup)|@vite\/env|\.vscode\/sftp\.json|js\/config\.js)/ },
     { label: 'login', pattern: /^\/(login|signin|sign-in|log-in|logon)(\/|$|\?)/ },
     { label: 'springboot', pattern: /^\/(actuator|v2\/api-docs|v3\/api-docs|webjars\/swagger-ui|swagger-ui\.html|api-docs)/ },
     { label: 'skimmer', pattern: /\/(twint|lkk|qr_modal|bot-connect|support_parent|sys_files|protect)/ },
@@ -121,7 +121,8 @@ export default {
         response ??= simulators['catch-all'](request, url);
 
         // ── Log to D1 asynchronously (non-blocking) ───────────────
-        if (!IGNORE_PATHS.includes(url.pathname)) {
+        const isTest = request.headers.get('X-Honeypot-Test') === env.ADMIN_SECRET;
+        if (!IGNORE_PATHS.includes(url.pathname) && !isTest) {
             ctx.waitUntil(logEvent(meta, env));
         }
 
