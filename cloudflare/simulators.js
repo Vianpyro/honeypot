@@ -4,7 +4,10 @@
 // ============================================================
 
 import { html, json, plain, phpHeaders } from './helpers.js';
-import { wpLoginPage, fakeEnvFile, fakeConfigJson, CTF_FLAG, GUEST_JWT, FAKE_GIT_REMOTE, FAKE_PHP_DB_PASSWORD } from './content.js';
+import {
+    wpLoginPage, fakeEnvFile, fakeConfigJson, CTF_FLAG, GUEST_JWT, FAKE_GIT_REMOTE, FAKE_PHP_DB_PASSWORD,
+    fakeTerraformState, fakeTerraformVars, fakeDockerCompose, fakeAwsCredentials, fakeGcpServiceAccount, fakeSshKey, fakeSymfonyParameters
+} from './content.js';
 
 export const simulators = {
 
@@ -121,6 +124,50 @@ export const simulators = {
             200,
             { 'Content-Type': 'application/javascript', Server: 'nginx/1.18.0' }
         );
+    },
+
+    // Simulates exposed infrastructure-as-code and cloud credential files
+    infra(_request, url) {
+        const p = url.pathname;
+
+        if (p.includes('terraform.tfstate')) {
+            return json(fakeTerraformState());
+        }
+        if (p.includes('terraform.tfvars')) {
+            return plain(fakeTerraformVars(), 200);
+        }
+        if (p.includes('docker-compose')) {
+            return plain(fakeDockerCompose(), 200, { 'Content-Type': 'text/yaml' });
+        }
+        if (p.includes('.aws/credentials')) {
+            return plain(fakeAwsCredentials(), 200);
+        }
+        if (p.includes('service-account') || p.includes('google-credentials') ||
+            p.includes('google-services') || p.includes('firebase-adminsdk')) {
+            return json(fakeGcpServiceAccount());
+        }
+        if (p.includes('id_rsa')) {
+            return plain(fakeSshKey(), 200);
+        }
+        if (p.includes('export.sql')) {
+            return plain(
+                `-- MySQL dump 8.0.35\n-- Host: localhost\n-- Database: app_prod\n` +
+                `CREATE TABLE users (id INT, email VARCHAR(255), password_hash VARCHAR(255));\n` +
+                `INSERT INTO users VALUES (1,'admin@example.com','$2y$10$fakehashedpassword');\n`,
+                200, { 'Content-Type': 'text/plain' }
+            );
+        }
+        if (p.includes('sftp-config') || p.includes('opencode')) {
+            return json({
+                type: 'sftp', host: '54.210.167.33', port: 22,
+                user: 'deploy', password: 'dep10yP@ss!', remotePath: '/var/www/app',
+            });
+        }
+        // Symfony parameters.yml
+        if (p.includes('parameters.yml')) {
+            return plain(fakeSymfonyParameters(), 200, { 'Content-Type': 'text/yaml' });
+        }
+        return plain('', 403);
     },
 
     api(request, url) {

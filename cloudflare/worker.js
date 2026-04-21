@@ -17,6 +17,7 @@ const SIMULATORS = [
     { label: 'login', pattern: /^\/(login|signin|sign-in|log-in|logon)(\/|$|\?)/ },
     { label: 'springboot', pattern: /^\/(actuator|v2\/api-docs|v3\/api-docs|webjars\/swagger-ui|swagger-ui\.html|api-docs)/ },
     { label: 'skimmer', pattern: /\/(twint|lkk|qr_modal|bot-connect|support_parent|sys_files|protect)/ },
+    { label: 'infra', pattern: /^\/(terraform\.|docker-compose|\.aws\/|\.docker\/|id_rsa|export\.sql|sftp-config|opencode|service-account|google-credentials|google-services|firebase-adminsdk|app\/config\/parameters)/ },
     { label: 'api', pattern: /^\/api\/v[0-9]+\// },
     { label: 'admin', pattern: /^\/(admin|administrator|manager\/html|console|panel|dashboard)/ },
     { label: 'cgi', pattern: /^\/(cgi-bin|cgi)/ },
