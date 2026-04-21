@@ -170,6 +170,49 @@ export const simulators = {
         return plain('', 403);
     },
 
+    // Simulates a GraphQL endpoint — responds to introspection and common queries
+    graphql(request, _url) {
+        // Introspection query — bots use this to map the schema
+        if (request.method === 'POST') {
+            return json({
+                data: {
+                    __schema: {
+                        queryType: { name: 'Query' },
+                        mutationType: { name: 'Mutation' },
+                        types: [
+                            {
+                                name: 'Query', fields: [
+                                    { name: 'user', args: [{ name: 'id', type: { name: 'ID' } }] },
+                                    { name: 'users', args: [] },
+                                    { name: 'me', args: [] },
+                                    { name: 'token', args: [{ name: 'username', type: { name: 'String' } }, { name: 'password', type: { name: 'String' } }] },
+                                ]
+                            },
+                            {
+                                name: 'Mutation', fields: [
+                                    { name: 'login', args: [{ name: 'username', type: { name: 'String' } }, { name: 'password', type: { name: 'String' } }] },
+                                    { name: 'createUser', args: [{ name: 'input', type: { name: 'UserInput' } }] },
+                                    { name: 'deleteUser', args: [{ name: 'id', type: { name: 'ID' } }] },
+                                ]
+                            },
+                            {
+                                name: 'User', fields: [
+                                    { name: 'id' }, { name: 'email' }, { name: 'role' },
+                                    { name: 'passwordHash' }, { name: 'apiKey' },
+                                ]
+                            },
+                        ],
+                    },
+                },
+            });
+        }
+        // GET — return GraphQL playground UI (common on misconfigured servers)
+        return html(`<!DOCTYPE html><html><head><title>GraphQL Playground</title></head><body>
+<div id="root"><p>Loading GraphQL Playground...</p></div>
+<script>window.GRAPHQL_ENDPOINT = '/graphql';</script>
+</body></html>`, 200, { Server: 'nginx/1.18.0' });
+    },
+
     api(request, url) {
         // CTF Step 2 — reached by decoding SECRET_HINT from the .env file (base64)
         if (url.pathname === '/api/v1/internal/health') {

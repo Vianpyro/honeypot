@@ -21,6 +21,7 @@ const SIMULATORS = [
     { label: 'mail', pattern: /^\/(webmail|roundcube|squirrelmail|horde|rainloop|mail|owa|exchange|autodiscover|remote)(\/|$)/ },
     { label: 'vpn', pattern: /^\/(vpn|remote|sslvpn|citrix|pulse|fortivpn|globalprotect|dana-na|\+CSCOE\+|remote\/login)(\/|$)/ },
     { label: 'cdn', pattern: /^\/(cdn|assets|static|files|uploads|media|storage|s3)(\/|$)/ },
+    { label: 'graphql', pattern: /^\/(graphql|api\/graphql|api\/gql|gql)(\/|$|\?)/ },
     { label: 'api', pattern: /^\/api\/v[0-9]+\// },
     { label: 'admin', pattern: /^\/(admin|administrator|manager\/html|console|panel|dashboard)/ },
     { label: 'cgi', pattern: /^\/(cgi-bin|cgi)/ },
