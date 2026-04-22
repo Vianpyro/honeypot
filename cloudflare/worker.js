@@ -31,22 +31,36 @@ const SIMULATORS = [
 // Paths that generate no useful threat intelligence — skip logging
 const IGNORE_PATHS = ['/favicon.ico', '/robots.txt', '/sitemap.xml'];
 
+async function safeCompare(a, b) {
+    if (!a || !b) return false;
+    const enc = new TextEncoder();
+    const ta = enc.encode(a);
+    const tb = enc.encode(b);
+    const [ha, hb] = await Promise.all([
+        crypto.subtle.digest('SHA-256', ta),
+        crypto.subtle.digest('SHA-256', tb),
+    ]);
+    return crypto.subtle.timingSafeEqual(ha, hb);
+}
+
 export default {
 
     // ── Scheduled cleanup (nightly Cron Trigger) ───────────────
     async scheduled(_event, env, _ctx) {
-        // Remove events older than 30 days
-        await env.DB.prepare(
-            "DELETE FROM events WHERE created_at < datetime('now', '-30 days')"
-        ).run();
+        try {
+            await env.DB.prepare(
+                "DELETE FROM events WHERE created_at < datetime('now', '-30 days')"
+            ).run();
 
-        // Hard cap at 50,000 rows to stay within D1 free tier limits
-        await env.DB.prepare(`
-      DELETE FROM events WHERE id IN (
-        SELECT id FROM events ORDER BY created_at ASC
-        LIMIT MAX(0, (SELECT COUNT(*) FROM events) - 50000)
-      )
-    `).run();
+            await env.DB.prepare(`
+        DELETE FROM events WHERE id IN (
+          SELECT id FROM events ORDER BY created_at ASC
+          LIMIT MAX(0, (SELECT COUNT(*) FROM events) - 50000)
+        )
+      `).run();
+        } catch (e) {
+            console.error('[honeypot] scheduled cleanup failed:', e.message);
+        }
     },
 
     async fetch(request, env, ctx) {
@@ -55,7 +69,7 @@ export default {
         // ── Protected stats endpoint ──────────────────────────────
         // GET /hp-stats  +  header X-Admin-Secret: <your secret>
         if (url.pathname.startsWith('/hp-stats')) {
-            if (request.headers.get('X-Admin-Secret') !== env.ADMIN_SECRET) {
+            if (!await safeCompare(request.headers.get('X-Admin-Secret'), env.ADMIN_SECRET)) {
                 return notFound();
             }
             return statsHandler(env, url);
@@ -79,12 +93,15 @@ export default {
 
         if (['POST', 'PUT', 'PATCH'].includes(request.method)) {
             try {
-                meta.body = (await request.text()).slice(0, 2000);
+                const cl = parseInt(request.headers.get('content-length') ?? '0');
+                if (cl < 100_000) {
+                    meta.body = (await request.text()).slice(0, 2000);
+                }
 
                 const ct = request.headers.get('content-type') ?? '';
 
                 // HTML form submissions
-                if (ct.includes('application/x-www-form-urlencoded') && meta.body) {
+                if (meta.body && ct.includes('application/x-www-form-urlencoded')) {
                     const p = new URLSearchParams(meta.body);
                     meta.username = p.get('log')          // WordPress
                         ?? p.get('username')      // generic
@@ -99,7 +116,7 @@ export default {
                 }
 
                 // JSON body
-                if (ct.includes('application/json') && meta.body) {
+                if (meta.body && ct.includes('application/json')) {
                     try {
                         const j = JSON.parse(meta.body);
                         meta.username = j.username ?? j.user ?? j.email ?? j.login ?? null;
@@ -121,7 +138,7 @@ export default {
         response ??= simulators['catch-all'](request, url);
 
         // ── Log to D1 asynchronously (non-blocking) ───────────────
-        const isTest = request.headers.get('X-Honeypot-Test') === env.ADMIN_SECRET;
+        const isTest = await safeCompare(request.headers.get('X-Honeypot-Test'), env.ADMIN_SECRET);
         if (!IGNORE_PATHS.includes(url.pathname) && !isTest) {
             ctx.waitUntil(logEvent(meta, env));
         }
