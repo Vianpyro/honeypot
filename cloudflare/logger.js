@@ -1,6 +1,5 @@
 // ============================================================
 //  logger.js — Async D1 event logger
-//  Public — safe to publish
 // ============================================================
 
 export async function logEvent(meta, env) {

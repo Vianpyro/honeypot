@@ -1,7 +1,6 @@
 // ============================================================
 //  worker.js — Honeypot entrypoint
 //  Bindings required: DB (D1), ADMIN_SECRET (env var)
-//  Public — safe to publish
 // ============================================================
 
 import { notFound } from './helpers.js';
@@ -10,7 +9,6 @@ import { statsHandler } from './stats.js';
 import { simulators } from './simulators.js';
 
 const SIMULATORS = [
-    // {1,2} allows double-slash paths like //sito/wp-includes/wlwmanifest.xml
     { label: 'wordpress', pattern: /^\/{1,2}(wp-admin|wp-login\.php|xmlrpc\.php|wp-json|wp-content|wp-includes)/ },
     { label: 'phpmyadmin', pattern: /^\/(phpmyadmin|pma|phpMyAdmin)/ },
     { label: 'sensitive', pattern: /^\/(\.env|api\/\.env|env$|\.git\/config|config\.php|\.htpasswd|web\.config|\.DS_Store|src\/\.env|config\.env|config\.json|\.env\.(local|production|prod|dev|staging|development|backup)|@vite\/env|\.vscode\/sftp\.json|js\/config\.js)/ },
@@ -31,6 +29,9 @@ const SIMULATORS = [
 // Paths that generate no useful threat intelligence — skip logging
 const IGNORE_PATHS = ['/favicon.ico', '/robots.txt', '/sitemap.xml'];
 
+// Retention: 366 days — well within D1 free tier (~730 MB/year at 1000 req/day, 5 GB limit)
+const RETENTION_DAYS = 366;
+
 async function safeCompare(a, b) {
     if (!a || !b) return false;
     const enc = new TextEncoder();
@@ -43,24 +44,32 @@ async function safeCompare(a, b) {
     return crypto.subtle.timingSafeEqual(ha, hb);
 }
 
+async function handleCron(cron, env) {
+    switch (cron) {
+        case '0 0 * * *':
+            return cleanupOldEntries(env);
+        default:
+            console.warn(`[cron] unhandled expression: ${cron}`);
+            return;
+    }
+}
+
+async function cleanupOldEntries(env) {
+    try {
+        const result = await env.DB.prepare(
+            `DELETE FROM events WHERE created_at < datetime('now', ?)`
+        ).bind(`-${RETENTION_DAYS} days`).run();
+        console.log(`[retention] ${result.meta.changes} rows deleted`);
+        return result;
+    } catch (e) {
+        console.error('[retention] cleanup failed:', e.message);
+    }
+}
+
 export default {
 
-    // ── Scheduled cleanup (nightly Cron Trigger) ───────────────
-    async scheduled(_event, env, _ctx) {
-        try {
-            await env.DB.prepare(
-                "DELETE FROM events WHERE created_at < datetime('now', '-30 days')"
-            ).run();
-
-            await env.DB.prepare(`
-        DELETE FROM events WHERE id IN (
-          SELECT id FROM events ORDER BY created_at ASC
-          LIMIT MAX(0, (SELECT COUNT(*) FROM events) - 50000)
-        )
-      `).run();
-        } catch (e) {
-            console.error('[honeypot] scheduled cleanup failed:', e.message);
-        }
+    async scheduled(event, env, ctx) {
+        ctx.waitUntil(handleCron(event.cron, env));
     },
 
     async fetch(request, env, ctx) {
@@ -103,12 +112,12 @@ export default {
                 // HTML form submissions
                 if (meta.body && ct.includes('application/x-www-form-urlencoded')) {
                     const p = new URLSearchParams(meta.body);
-                    meta.username = p.get('log')          // WordPress
+                    meta.username = p.get('log')  // WordPress
                         ?? p.get('username')      // generic
                         ?? p.get('pma_username')  // phpMyAdmin
                         ?? p.get('user')
                         ?? null;
-                    meta.password = p.get('pwd')           // WordPress
+                    meta.password = p.get('pwd')  // WordPress
                         ?? p.get('password')      // generic
                         ?? p.get('pma_password')  // phpMyAdmin
                         ?? p.get('pass')

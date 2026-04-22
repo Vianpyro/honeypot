@@ -1,6 +1,5 @@
 // ============================================================
 //  stats.js — Protected /hp-stats endpoint
-//  Public — safe to publish
 // ============================================================
 
 import { json } from './helpers.js';

@@ -1,6 +1,5 @@
 // ============================================================
 //  simulators.js — Service simulators
-//  Public — safe to publish (fake content imported from content.js)
 // ============================================================
 
 import { html, json, plain, phpHeaders } from './helpers.js';
