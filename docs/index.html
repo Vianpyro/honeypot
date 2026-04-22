@@ -715,7 +715,7 @@
         function countryLabel(code) {
             if (!code || code === 'XX') return 'Unknown';
             try {
-                const flag = String.fromCodePoint(...[...code.toUpperCase()].map(c => 0x1F1E0 - 65 + c.charCodeAt(0)));
+                const flag = String.fromCodePoint(...[...code.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
                 return flag + ' ' + (COUNTRY_NAMES.of(code) ?? code);
             } catch {
                 return code;

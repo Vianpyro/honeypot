@@ -11,7 +11,13 @@ const CORS_ORIGINS = new Set([
 const DEFAULT_DAYS = 90;
 const MAX_DAYS = 365;
 
-function corsHeaders(origin) {
+function corsHeaders(origin, isPrivate) {
+    if (!isPrivate) {
+        return {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        };
+    }
     const allowed = CORS_ORIGINS.has(origin) ? origin : null;
     if (!allowed) return {};
     return {
@@ -48,7 +54,7 @@ export async function statsHandler(env, url) {
 // ── Public/private stats API with caching ───────────────────
 export async function statsApiHandler(request, env, isPrivate) {
     const origin = request.headers.get('Origin') ?? '';
-    const cors = corsHeaders(origin);
+    const cors = corsHeaders(origin, isPrivate);
 
     if (request.method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: cors });
