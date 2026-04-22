@@ -6,7 +6,6 @@ import { json } from './helpers.js';
 
 const CORS_ORIGINS = new Set([
     'https://vianpyro.github.io',
-    'https://thevhome.com',
 ]);
 
 const DEFAULT_DAYS = 90;
