@@ -1,11 +1,12 @@
 // ============================================================
 //  worker.js — Honeypot entrypoint
 //  Bindings required: DB (D1), ADMIN_SECRET (env var)
+//  Public — safe to publish
 // ============================================================
 
 import { notFound } from './helpers.js';
 import { logEvent } from './logger.js';
-import { statsHandler } from './stats.js';
+import { statsHandler, statsApiHandler } from './stats.js';
 import { simulators } from './simulators.js';
 
 const SIMULATORS = [
@@ -75,13 +76,24 @@ export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
 
-        // ── Protected stats endpoint ──────────────────────────────
-        // GET /hp-stats  +  header X-Admin-Secret: <your secret>
+        // ── Legacy private stats endpoint ─────────────────────────
         if (url.pathname.startsWith('/hp-stats')) {
             if (!await safeCompare(request.headers.get('X-Admin-Secret'), env.ADMIN_SECRET)) {
                 return notFound();
             }
             return statsHandler(env, url);
+        }
+
+        // ── Public/private stats API ──────────────────────────────
+        // GET /stats/api              → public (aggregated, no IPs)
+        // GET /stats/api?token=xxx    → private (full data, IPs, payloads)
+        if (url.pathname === '/stats/api') {
+            if (request.method === 'OPTIONS') {
+                return statsApiHandler(request, env, false);
+            }
+            const token = url.searchParams.get('token');
+            const isPrivate = token ? await safeCompare(token, env.ADMIN_SECRET) : false;
+            return statsApiHandler(request, env, isPrivate);
         }
 
         // ── Collect attacker metadata ─────────────────────────────
@@ -112,19 +124,18 @@ export default {
                 // HTML form submissions
                 if (meta.body && ct.includes('application/x-www-form-urlencoded')) {
                     const p = new URLSearchParams(meta.body);
-                    meta.username = p.get('log')  // WordPress
-                        ?? p.get('username')      // generic
-                        ?? p.get('pma_username')  // phpMyAdmin
+                    meta.username = p.get('log')
+                        ?? p.get('username')
+                        ?? p.get('pma_username')
                         ?? p.get('user')
                         ?? null;
-                    meta.password = p.get('pwd')  // WordPress
-                        ?? p.get('password')      // generic
-                        ?? p.get('pma_password')  // phpMyAdmin
+                    meta.password = p.get('pwd')
+                        ?? p.get('password')
+                        ?? p.get('pma_password')
                         ?? p.get('pass')
                         ?? null;
                 }
 
-                // JSON body
                 if (meta.body && ct.includes('application/json')) {
                     try {
                         const j = JSON.parse(meta.body);
