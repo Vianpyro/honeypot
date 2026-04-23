@@ -173,12 +173,12 @@ main {
     padding: 20px 24px;
     display: grid;
     gap: 14px;
-    /* 4-col base, panels use explicit placement */
     grid-template-columns: repeat(4, 1fr);
     grid-template-areas:
         "kpi     kpi     kpi     kpi"
         "vol     vol     vol     vol"
         "ctr     svc     pth     asn"
+        "tls     tls     prt     prt"
         "usr     usr     usr     usr";
     width: 100%;
 }
@@ -292,6 +292,14 @@ main {
 
 .panel-asns {
     grid-area: asn;
+}
+
+.panel-tls {
+    grid-area: tls;
+}
+
+.panel-protocols {
+    grid-area: prt;
 }
 
 .panel-usernames {
@@ -511,8 +519,16 @@ footer a:hover {
     animation-delay: 0.36s;
 }
 
-.panel-usernames {
+.panel-tls {
     animation-delay: 0.40s;
+}
+
+.panel-protocols {
+    animation-delay: 0.44s;
+}
+
+.panel-usernames {
+    animation-delay: 0.48s;
 }
 
 /* ── Responsive ── */
@@ -526,6 +542,7 @@ footer a:hover {
             "vol     vol"
             "ctr     svc"
             "pth     asn"
+            "tls     prt"
             "usr     usr";
     }
 
@@ -561,6 +578,8 @@ footer a:hover {
             "svc"
             "pth"
             "asn"
+            "tls"
+            "prt"
             "usr";
         gap: 12px;
     }

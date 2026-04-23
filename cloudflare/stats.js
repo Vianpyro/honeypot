@@ -94,11 +94,19 @@ export async function statsApiHandler(request, env, isPrivate) {
         ).bind(interval).all(),
         // Top ASNs
         env.DB.prepare(
-            `SELECT asn, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') AND asn IS NOT NULL GROUP BY asn ORDER BY c DESC LIMIT 10`
+            `SELECT asn, as_organization, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') AND asn IS NOT NULL GROUP BY asn, as_organization ORDER BY c DESC LIMIT 10`
         ).bind(interval).all(),
         // Top usernames (no passwords)
         env.DB.prepare(
             `SELECT username, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') AND username IS NOT NULL GROUP BY username ORDER BY c DESC LIMIT 10`
+        ).bind(interval).all(),
+        // Top TLS versions
+        env.DB.prepare(
+            `SELECT tls_version, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') AND tls_version IS NOT NULL GROUP BY tls_version ORDER BY c DESC LIMIT 6`
+        ).bind(interval).all(),
+        // Top HTTP protocols
+        env.DB.prepare(
+            `SELECT http_protocol, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') AND http_protocol IS NOT NULL GROUP BY http_protocol ORDER BY c DESC LIMIT 6`
         ).bind(interval).all(),
         // Distinct country count
         env.DB.prepare(
@@ -108,23 +116,36 @@ export async function statsApiHandler(request, env, isPrivate) {
         env.DB.prepare(
             `SELECT COUNT(DISTINCT service) total FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now')`
         ).bind(interval).first(),
+        // Distinct username count (not capped, unlike top_usernames)
+        env.DB.prepare(
+            `SELECT COUNT(DISTINCT username) total FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') AND username IS NOT NULL`
+        ).bind(interval).first(),
         // Total count
         env.DB.prepare(
             `SELECT COUNT(*) total FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now')`
         ).bind(interval).first(),
     ];
 
-    const [volume, topCountries, topServices, topPaths, topAsns, topUsernames, totalCountries, totalServices, total] =
+    const [volume, topCountries, topServices, topPaths, topAsns, topUsernames, topTls, topProtocols, totalCountries, totalServices, totalUsernames, total] =
         await Promise.all(publicQueries);
 
     const payload = {
-        meta: { days, total: total?.total ?? 0, total_countries: totalCountries?.total ?? 0, total_services: totalServices?.total ?? 0, generated_at: new Date().toISOString() },
+        meta: {
+            days,
+            total: total?.total ?? 0,
+            total_countries: totalCountries?.total ?? 0,
+            total_services: totalServices?.total ?? 0,
+            total_usernames: totalUsernames?.total ?? 0,
+            generated_at: new Date().toISOString()
+        },
         volume: volume.results,
         top_countries: topCountries.results,
         top_services: topServices.results,
         top_paths: topPaths.results,
         top_asns: topAsns.results,
         top_usernames: topUsernames.results,
+        top_tls: topTls.results,
+        top_protocols: topProtocols.results,
     };
 
     if (isPrivate) {

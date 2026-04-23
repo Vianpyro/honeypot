@@ -65,7 +65,7 @@ function renderChart(volume) {
 }
 
 function setLoading() {
-    ['list-countries', 'list-services', 'list-paths', 'list-asns', 'list-usernames-a', 'list-usernames-b']
+    ['list-countries', 'list-services', 'list-paths', 'list-asns', 'list-tls', 'list-protocols', 'list-usernames-a', 'list-usernames-b']
         .forEach(id => { const e = el(id); if (e) e.innerHTML = '<li class="loading">loading...</li>'; });
     el('chart-bars').innerHTML = '<div class="loading">loading data...</div>';
 }
@@ -86,7 +86,7 @@ async function load(days) {
         el('kpi-total').textContent = d.meta.total < 10_000 ? d.meta.total : fmtNum(d.meta.total);
         el('kpi-countries').textContent = d.meta.total_countries ?? '—';
         el('kpi-services').textContent = d.meta.total_services ?? '—';
-        el('kpi-creds').textContent = fmtNum(d.top_usernames?.length ?? 0);
+        el('kpi-creds').textContent = fmtNum(d.meta.total_usernames ?? 0);
 
         renderChart(d.volume);
 
@@ -102,7 +102,15 @@ async function load(days) {
             item => item.path ?? '/', maxC(d.top_paths));
 
         renderRankList('list-asns', d.top_asns,
-            item => 'AS' + item.asn, maxC(d.top_asns));
+            item => item.as_organization ? `AS${item.asn} - ${item.as_organization}` : `AS${item.asn}`,
+            maxC(d.top_asns));
+
+        renderRankList('list-tls', d.top_tls,
+            item => item.tls_version ?? 'unknown', maxC(d.top_tls));
+
+        renderRankList('list-protocols', d.top_protocols,
+            item => item.http_protocol ?? 'unknown', maxC(d.top_protocols));
+
 
         // Split usernames across two columns
         const usernames = d.top_usernames ?? [];
@@ -118,7 +126,7 @@ async function load(days) {
         el('status-dot').style.background = 'var(--red)';
         el('status-dot').style.boxShadow = '0 0 8px var(--red)';
         const errHtml = `<li class="error-msg">error: ${escHtml(e.message)}</li>`;
-        ['list-countries', 'list-services', 'list-paths', 'list-asns', 'list-usernames-a', 'list-usernames-b']
+        ['list-countries', 'list-services', 'list-paths', 'list-asns', 'list-tls', 'list-protocols', 'list-usernames-a', 'list-usernames-b']
             .forEach(id => { const elem = el(id); if (elem) elem.innerHTML = errHtml; });
         el('chart-bars').innerHTML = `<div class="error-msg">error: ${escHtml(e.message)}</div>`;
     }
