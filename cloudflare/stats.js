@@ -78,31 +78,31 @@ export async function statsApiHandler(request, env, isPrivate) {
     const publicQueries = [
         // Daily volume
         env.DB.prepare(
-            `SELECT date(created_at) d, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) GROUP BY d ORDER BY d ASC`
+            `SELECT date(created_at) d, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') GROUP BY d ORDER BY d ASC`
         ).bind(interval).all(),
         // Top countries
         env.DB.prepare(
-            `SELECT country, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) GROUP BY country ORDER BY c DESC LIMIT 10`
+            `SELECT country, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') GROUP BY country ORDER BY c DESC LIMIT 10`
         ).bind(interval).all(),
         // Top services
         env.DB.prepare(
-            `SELECT service, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) GROUP BY service ORDER BY c DESC LIMIT 10`
+            `SELECT service, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') GROUP BY service ORDER BY c DESC LIMIT 10`
         ).bind(interval).all(),
         // Top paths
         env.DB.prepare(
-            `SELECT path, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) GROUP BY path ORDER BY c DESC LIMIT 10`
+            `SELECT path, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') GROUP BY path ORDER BY c DESC LIMIT 10`
         ).bind(interval).all(),
         // Top ASNs
         env.DB.prepare(
-            `SELECT asn, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND asn IS NOT NULL GROUP BY asn ORDER BY c DESC LIMIT 10`
+            `SELECT asn, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') AND asn IS NOT NULL GROUP BY asn ORDER BY c DESC LIMIT 10`
         ).bind(interval).all(),
         // Top usernames (no passwords)
         env.DB.prepare(
-            `SELECT username, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND username IS NOT NULL GROUP BY username ORDER BY c DESC LIMIT 10`
+            `SELECT username, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') AND username IS NOT NULL GROUP BY username ORDER BY c DESC LIMIT 10`
         ).bind(interval).all(),
         // Total count
         env.DB.prepare(
-            `SELECT COUNT(*) total FROM events WHERE created_at >= datetime('now', ?)`
+            `SELECT COUNT(*) total FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now')`
         ).bind(interval).first(),
     ];
 

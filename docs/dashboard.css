@@ -89,9 +89,8 @@ header::after {
     font-size: 11px;
     color: var(--muted);
     padding-bottom: 1px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    word-break: break-word;
 }
 
 .header-meta b {
@@ -417,9 +416,8 @@ main {
     padding: 0 7px;
     font-size: 11px;
     color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    word-break: break-word;
 }
 
 .rank-count {
