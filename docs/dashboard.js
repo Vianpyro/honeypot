@@ -80,9 +80,12 @@ async function load(days) {
 
         el('hdr-total').textContent = fmtNum(d.meta.total);
         el('hdr-ts').textContent = new Date(d.meta.generated_at).toLocaleTimeString();
-        el('kpi-total').textContent = fmtNum(d.meta.total);
-        el('kpi-countries').textContent = d.top_countries?.length ?? '—';
-        el('kpi-services').textContent = d.top_services?.length ?? '—';
+        el('hdr-status').textContent = 'honeypot active';
+        el('status-dot').style.background = '';
+        el('status-dot').style.boxShadow = '';
+        el('kpi-total').textContent = d.meta.total < 10_000 ? d.meta.total : fmtNum(d.meta.total);
+        el('kpi-countries').textContent = d.meta.total_countries ?? '—';
+        el('kpi-services').textContent = d.meta.total_services ?? '—';
         el('kpi-creds').textContent = fmtNum(d.top_usernames?.length ?? 0);
 
         renderChart(d.volume);
@@ -111,6 +114,9 @@ async function load(days) {
             item => item.username, maxU);
 
     } catch (e) {
+        el('hdr-status').textContent = 'honeypot unreachable';
+        el('status-dot').style.background = 'var(--red)';
+        el('status-dot').style.boxShadow = '0 0 8px var(--red)';
         const errHtml = `<li class="error-msg">error: ${escHtml(e.message)}</li>`;
         ['list-countries', 'list-services', 'list-paths', 'list-asns', 'list-usernames-a', 'list-usernames-b']
             .forEach(id => { const elem = el(id); if (elem) elem.innerHTML = errHtml; });

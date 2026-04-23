@@ -64,7 +64,7 @@ export async function statsApiHandler(request, env, isPrivate) {
     const days = Math.min(parseInt(url.searchParams.get('days') ?? String(DEFAULT_DAYS)), MAX_DAYS);
     const cacheKey = `stats-${isPrivate ? 'priv' : 'pub'}-${days}`;
 
-    // Cache API — TTL 10 min for public, 2 min for private
+    // Cache API — TTL 15 min for public, 2 min for private
     const cache = caches.default;
     const cacheUrl = new URL(`https://cache.internal/${cacheKey}`);
     const cached = await cache.match(cacheUrl);
@@ -100,17 +100,25 @@ export async function statsApiHandler(request, env, isPrivate) {
         env.DB.prepare(
             `SELECT username, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now') AND username IS NOT NULL GROUP BY username ORDER BY c DESC LIMIT 10`
         ).bind(interval).all(),
+        // Distinct country count
+        env.DB.prepare(
+            `SELECT COUNT(DISTINCT country) total FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now')`
+        ).bind(interval).first(),
+        // Distinct service count
+        env.DB.prepare(
+            `SELECT COUNT(DISTINCT service) total FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now')`
+        ).bind(interval).first(),
         // Total count
         env.DB.prepare(
             `SELECT COUNT(*) total FROM events WHERE created_at >= datetime('now', ?) AND created_at < date('now')`
         ).bind(interval).first(),
     ];
 
-    const [volume, topCountries, topServices, topPaths, topAsns, topUsernames, total] =
+    const [volume, topCountries, topServices, topPaths, topAsns, topUsernames, totalCountries, totalServices, total] =
         await Promise.all(publicQueries);
 
     const payload = {
-        meta: { days, total: total?.total ?? 0, generated_at: new Date().toISOString() },
+        meta: { days, total: total?.total ?? 0, total_countries: totalCountries?.total ?? 0, total_services: totalServices?.total ?? 0, generated_at: new Date().toISOString() },
         volume: volume.results,
         top_countries: topCountries.results,
         top_services: topServices.results,
@@ -141,7 +149,7 @@ export async function statsApiHandler(request, env, isPrivate) {
         payload.top_hosts = topHosts.results;
     }
 
-    const ttl = isPrivate ? 120 : 600;
+    const ttl = isPrivate ? 120 : 900;
     const cacheResponse = new Response(JSON.stringify(payload), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': `s-maxage=${ttl}` },
     });

@@ -18,8 +18,8 @@
         <div>
             <div class="logo">thevhome<span>.com</span></div>
             <div class="header-meta" style="margin-top:4px">
-                <span class="status-dot"></span>
-                honeypot active &mdash; <b id="hdr-total">—</b> events captured &mdash;
+                <span class="status-dot" id="status-dot"></span>
+                <span id="hdr-status">connecting...</span> &mdash; <b id="hdr-total">—</b> events captured &mdash;
                 updated <b id="hdr-ts">—</b>
             </div>
         </div>
@@ -137,7 +137,7 @@
     </main>
 
     <footer>
-        <span>data retained 365 days &mdash; 24h display delay &mdash; IPs anonymised in public view</span>
+        <span>data retained 365 days &mdash; IPs anonymised in public view</span>
         <span>powered by <a href="https://workers.cloudflare.com" target="_blank" rel="noopener">Cloudflare Workers</a>
             + D1</span>
         <a href="https://github.com/vianpyro/honeypot" target="_blank" rel="noopener">source</a>
