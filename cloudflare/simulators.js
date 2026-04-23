@@ -384,6 +384,50 @@ ${FAKE_PHP_ENV_ROWS}
         return plain('Access Denied', 403, { Server: 'AmazonS3' });
     },
 
+    root(_request, _url) {
+        return html(`<!DOCTYPE html><html><head><title>Welcome to nginx!</title>
+<style>body{width:35em;margin:0 auto;font-family:Tahoma,Verdana,Arial,sans-serif}</style>
+</head><body><h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.</p>
+<p><em>Thank you for using nginx.</em></p></body></html>`, 200, { Server: 'nginx/1.18.0' });
+    },
+
+    apache_status(_request, url) {
+        const p = url.pathname;
+        if (p === '/server-status') {
+            return plain(
+                `Apache Server Status for localhost\n\n` +
+                `Server Version: Apache/2.4.41 (Ubuntu) OpenSSL/1.1.1f\n` +
+                `Server MPM: event\n` +
+                `Server Built: 2020-08-12T21:33:25\n` +
+                `Current Time: ${new Date().toUTCString()}\n` +
+                `Parent Server Config. Generation: 1\n` +
+                `Server uptime: 42 days 3 hours 17 minutes\n` +
+                `Server load: 0.15 0.08 0.05\n` +
+                `Total accesses: 1043521 - Total Traffic: 47.3 GB\n` +
+                `CPU Usage: u123.4 s45.6 cu0 cs0 - 0.15% CPU load\n` +
+                `3.12 requests/sec - 138 B/second\n` +
+                `5 requests currently being processed, 45 idle workers\n\n` +
+                `___W__K_____W______................................\n`,
+                200, { Server: 'Apache/2.4.41 (Ubuntu)' }
+            );
+        }
+        if (p === '/server-info') {
+            return plain(
+                `Apache Server Information\n\n` +
+                `Server Version: Apache/2.4.41 (Ubuntu) OpenSSL/1.1.1f\n` +
+                `Loaded Modules: core_module, mpm_event_module, http_module, ` +
+                `authn_file_module, auth_basic_module, authz_host_module, ` +
+                `rewrite_module, ssl_module, headers_module, proxy_module\n`,
+                200, { Server: 'Apache/2.4.41 (Ubuntu)' }
+            );
+        }
+        return json({ name: 'app', version: '2.4.1', environment: 'production', status: 'ok' });
+    },
+
     'catch-all'(_request, _url) {
         return html(`<!DOCTYPE html><html><head><title>404 Not Found</title></head>
 <body><h1>Not Found</h1><p>The requested URL was not found on this server.</p>

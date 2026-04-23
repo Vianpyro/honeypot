@@ -1,7 +1,6 @@
 // ============================================================
 //  worker.js — Honeypot entrypoint
 //  Bindings required: DB (D1), ADMIN_SECRET (env var)
-//  Public — safe to publish
 // ============================================================
 
 import { notFound } from './helpers.js';
@@ -10,7 +9,7 @@ import { statsHandler, statsApiHandler } from './stats.js';
 import { simulators } from './simulators.js';
 
 const SIMULATORS = [
-    { label: 'wordpress', pattern: /^\/{1,2}(wp-admin|wp-login\.php|xmlrpc\.php|wp-json|wp-content|wp-includes)/ },
+    { label: 'wordpress', pattern: /^\/{1,2}(?:[\w-]+\/)?(wp-admin|wp-login\.php|xmlrpc\.php|wp-json|wp-content|wp-includes)/ },
     { label: 'phpmyadmin', pattern: /^\/(phpmyadmin|pma|phpMyAdmin)/ },
     { label: 'sensitive', pattern: /^\/(\.env|api\/\.env|env$|\.git\/config|config\.php|\.htpasswd|web\.config|\.DS_Store|src\/\.env|config\.env|config\.json|\.env\.(local|production|prod|dev|staging|development|backup)|@vite\/env|\.vscode\/sftp\.json|js\/config\.js)/ },
     { label: 'login', pattern: /^\/(login|signin|sign-in|log-in|logon)(\/|$|\?)/ },
@@ -25,6 +24,8 @@ const SIMULATORS = [
     { label: 'api', pattern: /^\/api\/v[0-9]+\// },
     { label: 'admin', pattern: /^\/(admin|administrator|manager\/html|console|panel|dashboard)/ },
     { label: 'cgi', pattern: /^\/(cgi-bin|cgi)/ },
+    { label: 'apache_status', pattern: /^\/(server-status|server-info|server|about|version)(\/|$|\?)/ },
+    { label: 'root', pattern: /^\/$/ },
 ];
 
 // Paths that generate no useful threat intelligence — skip logging
@@ -101,6 +102,10 @@ export default {
             ip: request.headers.get('CF-Connecting-IP') ?? 'unknown',
             country: request.cf?.country ?? 'XX',
             asn: request.cf?.asn ?? 0,
+            as_organization: request.cf?.asOrganization ?? null,
+            tls_version: request.cf?.tlsVersion ?? null,
+            http_protocol: request.cf?.httpProtocol ?? null,
+            client_tcp_rtt: request.cf?.clientTcpRtt ?? null,
             ua: request.headers.get('User-Agent') ?? '',
             method: request.method,
             path: url.pathname + url.search,
@@ -128,19 +133,36 @@ export default {
                         ?? p.get('username')
                         ?? p.get('pma_username')
                         ?? p.get('user')
+                        ?? p.get('_user')
+                        ?? p.get('usr')
+                        ?? p.get('email')
                         ?? null;
                     meta.password = p.get('pwd')
                         ?? p.get('password')
                         ?? p.get('pma_password')
                         ?? p.get('pass')
+                        ?? p.get('_pass')
+                        ?? p.get('credential')
                         ?? null;
                 }
 
                 if (meta.body && ct.includes('application/json')) {
                     try {
                         const j = JSON.parse(meta.body);
-                        meta.username = j.username ?? j.user ?? j.email ?? j.login ?? null;
-                        meta.password = j.password ?? j.pass ?? j.secret ?? null;
+                        meta.username = j.username
+                            ?? j.user
+                            ?? j.email
+                            ?? j.login
+                            ?? j._user
+                            ?? j.usr
+                            ?? null;
+                        meta.password = j.password
+                            ?? j.pass
+                            ?? j.secret
+                            ?? j._pass
+                            ?? j.passwd
+                            ?? j.credential
+                            ?? null;
                     } catch { }
                 }
             } catch { }
