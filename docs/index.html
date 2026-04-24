@@ -27,10 +27,10 @@
             <span class="days-label">window:</span>
             <select id="days-select">
                 <option value="7">7d</option>
-                <option value="30">30d</option>
-                <option value="90" selected>90d</option>
-                <option value="180">180d</option>
-                <option value="365">365d</option>
+                <option value="15">15d</option>
+                <option value="30" selected>30d</option>
+                <option value="60">60d</option>
+                <option value="100">100d</option>
             </select>
             <button class="btn-refresh" id="btn-refresh">&#x21bb; refresh</button>
         </div>
@@ -71,6 +71,7 @@
                         <div class="loading">loading data...</div>
                     </div>
                 </div>
+                <div class="chart-legend" id="chart-legend"></div>
             </div>
         </div>
 

@@ -6,7 +6,7 @@ import { html, json, plain, phpHeaders } from './helpers.js';
 import {
     wpLoginPage, fakeEnvFile, fakeConfigJson, CTF_FLAG, GUEST_JWT, FAKE_GIT_REMOTE, FAKE_PHP_DB_PASSWORD,
     fakeTerraformState, fakeTerraformVars, fakeDockerCompose, fakeAwsCredentials, fakeGcpServiceAccount,
-    fakeSshKey, fakeSymfonyParameters, FAKE_PHP_ENV_ROWS, fakeJsConfig
+    fakeSshKey, fakeSymfonyParameters, FAKE_PHP_ENV_ROWS, fakeJsConfig, FAKE_DB_USER
 } from './content.js';
 
 export const simulators = {
@@ -434,5 +434,57 @@ working. Further configuration is required.</p>
 <hr><address>Apache/2.4.41 (Ubuntu) Server at Port 443</address></body></html>`, 404, {
             Server: 'Apache/2.4.41 (Ubuntu)',
         });
+    },
+
+    laravel(_request, url) {
+        const p = url.pathname;
+        if (p.startsWith('/telescope')) {
+            return html(`<!DOCTYPE html><html><head><title>Laravel Telescope</title></head><body>
+<div id="telescope">
+<script>window.Telescope = { path: 'telescope', timezone: 'UTC', recording: true };</script>
+<p>Loading Telescope...</p>
+</div></body></html>`, 200, { Server: 'nginx/1.18.0', 'X-Powered-By': 'PHP/8.2.0' });
+        }
+        if (p.startsWith('/horizon')) {
+            return html(`<!DOCTYPE html><html><head><title>Laravel Horizon</title></head><body>
+<div id="horizon">
+<script>window.Horizon = { path: 'horizon', defaults: { environments: ['production'] } };</script>
+<p>Loading Horizon...</p>
+</div></body></html>`, 200, { Server: 'nginx/1.18.0', 'X-Powered-By': 'PHP/8.2.0' });
+        }
+        return json({
+            id: 'fake-debugbar-id',
+            data: {
+                __meta: { id: 'fake', datetime: new Date().toISOString(), uriPath: '/', env: 'production', php_version: '8.2.0' },
+                config: { data: { APP_KEY: 'base64:****************', DB_PASSWORD: '****************' } },
+            },
+        });
+    },
+
+    aspnet(_request, url) {
+        const p = url.pathname;
+        if (p.includes('trace.axd')) {
+            return html(`<!DOCTYPE html><html><head><title>Application Trace</title></head><body>
+<h2>Application Trace</h2>
+<p><b>Physical Directory:</b> C:\\inetpub\\wwwroot\\app</p>
+<table border="1" cellpadding="3">
+<tr><th>No.</th><th>Time of Request</th><th>File</th><th>Status Code</th><th>Verb</th></tr>
+<tr><td>1</td><td>${new Date().toLocaleTimeString()}</td><td>/default.aspx</td><td>200</td><td>GET</td></tr>
+</table></body></html>`, 200, { Server: 'Microsoft-IIS/10.0', 'X-Powered-By': 'ASP.NET', 'X-AspNet-Version': '4.0.30319' });
+        }
+        return html(`<!DOCTYPE html><html><head><title>Error Log</title></head><body>
+<h2>Error Log for /</h2>
+<p>0 Error(s)</p>
+</body></html>`, 200, { Server: 'Microsoft-IIS/10.0', 'X-Powered-By': 'ASP.NET' });
+    },
+
+    yii(_request, url) {
+        const panel = new URL('https://x' + url.search).searchParams.get('panel') ?? 'config';
+        const panels = {
+            config: { name: 'Configuration', data: { 'YII_DEBUG': true, 'YII_ENV': 'dev', 'db.dsn': 'mysql:host=localhost;dbname=prod_db', 'db.username': FAKE_DB_USER } },
+            db: { name: 'Database', data: { queryCount: 4, queries: [{ query: 'SELECT * FROM users LIMIT 10', time: '1.2ms' }] } },
+            log: { name: 'Log', data: { messages: [{ level: 'error', category: 'yii\\db\\Command', message: 'Failed to connect to DB' }] } },
+        };
+        return json(panels[panel] ?? panels.config);
     },
 };

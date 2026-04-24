@@ -12,9 +12,9 @@ const SIMULATORS = [
     { label: 'wordpress', pattern: /^\/{1,2}(?:[\w-]+\/)?(wp-admin|wp-login\.php|xmlrpc\.php|wp-json|wp-content|wp-includes)/ },
     { label: 'phpmyadmin', pattern: /^\/(phpmyadmin|pma|phpMyAdmin)/ },
     { label: 'sensitive', pattern: /^\/(\.env|api\/\.env|env$|\.git\/config|config\.php|\.htpasswd|web\.config|\.DS_Store|src\/\.env|config\.env|config\.json|\.env\.(local|production|prod|dev|staging|development|backup)|@vite\/env|\.vscode\/sftp\.json|js\/config\.js)/ },
-    { label: 'login', pattern: /^\/(login|signin|sign-in|log-in|logon)(\/|$|\?)/ },
-    { label: 'springboot', pattern: /^\/(actuator|v2\/api-docs|v3\/api-docs|webjars\/swagger-ui|swagger-ui\.html|api-docs)/ },
-    { label: 'skimmer', pattern: /\/(twint|lkk|qr_modal|bot-connect|support_parent|sys_files|protect)/ },
+    { label: 'login', pattern: /^\/(login|signin|sign-in|log-in|logon|login\.action)(\/|$|\?)/ },
+    { label: 'springboot', pattern: /^\/(actuator|v2\/api-docs|v3\/api-docs|webjars\/swagger-ui|swagger-ui\.html|api-docs|swagger\/v[0-9]+\/swagger\.json)/ },
+    { label: 'skimmer', pattern: /\/(twint|lkk|qr_modal|bot-connect|support_parent|sys_files|protect)(\.js|\.css)?$/ },
     { label: 'infra', pattern: /^\/(terraform\.|docker-compose|\.aws\/|\.docker\/|id_rsa|export\.sql|sftp-config|opencode|service-account|google-credentials|google-services|firebase-adminsdk|app\/config\/parameters|v2\/_catalog)/ },
     { label: 'php', pattern: /^\/(info\.php|phpinfo\.php|pinfo\.php|test\.php|php\.php|i\.php)(\/|$|\?)/ },
     { label: 'mail', pattern: /^\/(webmail|roundcube|squirrelmail|horde|rainloop|mail|owa|exchange|autodiscover|remote)(\/|$)/ },
@@ -25,11 +25,23 @@ const SIMULATORS = [
     { label: 'admin', pattern: /^\/(admin|administrator|manager\/html|console|panel|dashboard)/ },
     { label: 'cgi', pattern: /^\/(cgi-bin|cgi)/ },
     { label: 'apache_status', pattern: /^\/(server-status|server-info|server|about|version)(\/|$|\?)/ },
+    { label: 'laravel', pattern: /^\/(telescope|horizon|debugbar)(\/|$)/ },
+    { label: 'aspnet', pattern: /^\/(trace\.axd|elmah\.axd|WebResource\.axd)(\/|$|\?)/ },
+    { label: 'yii', pattern: /^\/debug\/default\// },
     { label: 'root', pattern: /^\/$/ },
 ];
 
 // Paths that generate no useful threat intelligence — skip logging
-const IGNORE_PATHS = ['/favicon.ico', '/robots.txt', '/sitemap.xml'];
+const IGNORE_PATHS = [
+    '/favicon.ico',
+    '/robots.txt',
+    '/sitemap.xml',
+    '/.well-known/security.txt',
+    '/.well-known/security.json',
+    '/.well-known/dmarc-policy',
+    '/apple-touch-icon.png',
+    '/android-chrome-icon.png',
+];
 
 // Retention: 366 days — well within D1 free tier (~730 MB/year at 1000 req/day, 5 GB limit)
 const RETENTION_DAYS = 366;
@@ -108,7 +120,8 @@ export default {
             client_tcp_rtt: request.cf?.clientTcpRtt ?? null,
             ua: request.headers.get('User-Agent') ?? '',
             method: request.method,
-            path: url.pathname + url.search,
+            path: url.pathname,
+            query: url.search || null,
             host: request.headers.get('host') ?? '',
             body: null,
             username: null,

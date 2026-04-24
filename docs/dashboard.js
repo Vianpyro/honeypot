@@ -49,19 +49,78 @@ function renderRankList(listId, items, labelFn, max) {
     `).join('');
 }
 
-function renderChart(volume) {
+function renderChart(volume, campaignVolume) {
     const container = el('chart-bars');
     if (!volume?.length) {
         container.innerHTML = '<div class="loading">no data</div>';
         return;
     }
-    const max = Math.max(...volume.map(v => v.c), 1);
+
+    const maxEvents = Math.max(...volume.map(v => v.c), 1);
+
+    // Index campaign counts by date for O(1) lookup
+    const campByDay = Object.fromEntries((campaignVolume ?? []).map(r => [r.d, r.c]));
+    const maxCamp = Math.max(...Object.values(campByDay), 1);
+
+    // Bars
     container.innerHTML = volume.map(v => `
         <div class="bar-wrap">
-            <div class="bar-tooltip">${escHtml(v.d)}: ${v.c}</div>
-            <div class="bar" style="height:${Math.max(2, Math.round((v.c / max) * 100))}%"></div>
+            <div class="bar-tooltip">${escHtml(v.d)}: ${v.c} events${campByDay[v.d] ? ', ' + campByDay[v.d] + ' campaigns' : ''}</div>
+            <div class="bar" style="height:${Math.max(2, Math.round((v.c / maxEvents) * 100))}%"></div>
         </div>
     `).join('');
+
+    // SVG overlay for campaign line — drawn after bars are in the DOM
+    requestAnimationFrame(() => {
+        const wrap = container.closest('.chart-canvas-wrap');
+        if (!wrap) return;
+
+        const existingSvg = wrap.querySelector('.chart-svg');
+        if (existingSvg) existingSvg.remove();
+
+        const bars = container.querySelectorAll('.bar-wrap');
+        if (!bars.length || !campaignVolume?.length) return;
+
+        const wrapRect = wrap.getBoundingClientRect();
+        const H = wrapRect.height;
+
+        // Map each volume date to its bar's center x and the campaign count y
+        const points = volume.map((v, i) => {
+            const bar = bars[i];
+            if (!bar) return null;
+            const rect = bar.getBoundingClientRect();
+            const x = rect.left - wrapRect.left + rect.width / 2;
+            const count = campByDay[v.d] ?? 0;
+            // y=0 is top; invert so 0 campaigns sits at bottom
+            const y = count === 0 ? H : H - Math.round((count / maxCamp) * (H - 4)) - 2;
+            return { x, y, count, date: v.d };
+        }).filter(Boolean);
+
+        if (points.length < 2) return;
+
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.classList.add('chart-svg');
+        svg.setAttribute('width', wrapRect.width);
+        svg.setAttribute('height', H);
+
+        const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', d);
+        path.classList.add('campaign-line');
+        svg.appendChild(path);
+
+        // Dots only on days with campaigns
+        points.filter(p => p.count > 0).forEach(p => {
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', p.x.toFixed(1));
+            circle.setAttribute('cy', p.y.toFixed(1));
+            circle.setAttribute('r', '2.5');
+            circle.classList.add('campaign-dot');
+            svg.appendChild(circle);
+        });
+
+        wrap.appendChild(svg);
+    });
 }
 
 function setLoading() {
@@ -88,7 +147,11 @@ async function load(days) {
         el('kpi-services').textContent = d.meta.total_services ?? '—';
         el('kpi-creds').textContent = fmtNum(d.meta.total_usernames ?? 0);
 
-        renderChart(d.volume);
+        renderChart(d.volume, d.campaign_volume);
+        el('chart-legend').innerHTML = `
+            <span class="legend-item"><span class="legend-swatch legend-swatch-bar"></span>events</span>
+            <span class="legend-item"><span class="legend-swatch legend-swatch-line"></span>campaigns</span>
+        `;
 
         const maxC = arr => arr?.length ? Math.max(...arr.map(x => x.c)) : 1;
 

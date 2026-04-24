@@ -370,6 +370,56 @@ main {
     display: block;
 }
 
+/* Campaign overlay line */
+.chart-svg {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: visible;
+}
+
+.campaign-line {
+    fill: none;
+    stroke: #ff9500;
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+
+.campaign-dot {
+    fill: #ff9500;
+}
+
+.chart-legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+    font-size: 10px;
+    color: var(--muted);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.legend-swatch {
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+}
+
+.legend-swatch-bar {
+    background: var(--green-dim);
+}
+
+.legend-swatch-line {
+    background: #ff9500;
+    height: 2px;
+    margin-top: 4px;
+}
+
 /* ── Ranked list ── */
 .rank-list {
     list-style: none;
