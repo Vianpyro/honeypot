@@ -158,16 +158,16 @@ export async function statsApiHandler(request, env, isPrivate) {
         const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '100'), 1000);
         const [recent, topIPs, topCreds, topHosts] = await Promise.all([
             env.DB.prepare(
-                `SELECT ip, country, host, asn, method, path, service, username, password, ua, created_at FROM events WHERE created_at >= datetime('now', ?) ORDER BY created_at DESC LIMIT ?`
+                `SELECT ip, country, host, asn, method, path, service, username, password, ua, created_at FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) ORDER BY created_at DESC LIMIT ?`
             ).bind(interval, limit).all(),
             env.DB.prepare(
-                `SELECT ip, country, asn, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) GROUP BY ip ORDER BY c DESC LIMIT 20`
+                `SELECT ip, country, asn, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) GROUP BY ip ORDER BY c DESC LIMIT 20`
             ).bind(interval).all(),
             env.DB.prepare(
-                `SELECT username, password, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) AND username IS NOT NULL GROUP BY username, password ORDER BY c DESC LIMIT 50`
+                `SELECT username, password, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND username IS NOT NULL GROUP BY username, password ORDER BY c DESC LIMIT 50`
             ).bind(interval).all(),
             env.DB.prepare(
-                `SELECT host, COUNT(*) c FROM events WHERE created_at >= datetime('now', ?) GROUP BY host ORDER BY c DESC`
+                `SELECT host, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) GROUP BY host ORDER BY c DESC`
             ).bind(interval).all(),
         ]);
         payload.recent = recent.results;

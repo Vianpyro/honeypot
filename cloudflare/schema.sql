@@ -78,3 +78,20 @@ CREATE TABLE IF NOT EXISTS campaign_path_stats (
   mean          REAL    NOT NULL DEFAULT 0.0,
   m2            REAL    NOT NULL DEFAULT 0.0  -- running sum of squared diffs
 );
+
+-- -- Pending campaigns -----------------------------------------
+-- Fingerprints that have not yet crossed the confirmation threshold.
+-- Rows are promoted into `campaigns` (and deleted here) once
+-- event_count >= threshold OR asn_set.size > 1.
+
+CREATE TABLE IF NOT EXISTS pending_campaigns (
+  path_seq_hash TEXT    PRIMARY KEY,
+  first_seen_at TEXT    NOT NULL,
+  last_seen_at  TEXT    NOT NULL,
+  ip_set        TEXT    NOT NULL DEFAULT '[]',
+  asn_set       TEXT    NOT NULL DEFAULT '[]',
+  event_ids     TEXT    NOT NULL DEFAULT '[]',
+  event_count   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_last_seen ON pending_campaigns(last_seen_at);

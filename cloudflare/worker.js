@@ -60,7 +60,7 @@ async function safeCompare(a, b) {
 
 async function handleCron(cron, env) {
     switch (cron) {
-        case '0 0 * * *':
+        case '0 4 * * *':
             return cleanupOldEntries(env);
         default:
             console.warn(`[cron] unhandled expression: ${cron}`);
