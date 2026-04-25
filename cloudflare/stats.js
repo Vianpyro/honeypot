@@ -62,7 +62,7 @@ export async function statsApiHandler(request, env, isPrivate) {
 
     const url = new URL(request.url);
     const days = Math.min(parseInt(url.searchParams.get('days') ?? String(DEFAULT_DAYS)), MAX_DAYS);
-    const bucket = Math.floor(Date.now() / 900_000);
+    const bucket = Math.floor(Date.now() / 21_600_000); // ~6 hours
     const cacheKey = `stats-${isPrivate ? 'priv' : 'pub'}-${days}-${bucket}`;
 
     // Cache API — TTL 15 min for public, 2 min for private
@@ -75,60 +75,84 @@ export async function statsApiHandler(request, env, isPrivate) {
     }
 
     const interval = `-${days} days`;
+    const fromDay = `-${days} days`;
 
     const publicQueries = [
         // Daily volume
         env.DB.prepare(
-            `SELECT date(created_at) d, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours') GROUP BY d ORDER BY d ASC`
-        ).bind(interval).all(),
+            `SELECT day d, count c FROM stats_daily
+             WHERE dim = 'volume' AND day >= date('now', ?) AND day < date('now')
+             ORDER BY day ASC`
+        ).bind(fromDay).all(),
         // Top countries
         env.DB.prepare(
-            `SELECT country, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours') GROUP BY country ORDER BY c DESC LIMIT 10`
-        ).bind(interval).all(),
+            `SELECT key country, SUM(count) c FROM stats_daily
+             WHERE dim = 'country' AND day >= date('now', ?) AND day < date('now')
+             GROUP BY key ORDER BY c DESC LIMIT 10`
+        ).bind(fromDay).all(),
         // Top services
         env.DB.prepare(
-            `SELECT service, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours') GROUP BY service ORDER BY c DESC LIMIT 10`
-        ).bind(interval).all(),
+            `SELECT key service, SUM(count) c FROM stats_daily
+             WHERE dim = 'service' AND day >= date('now', ?) AND day < date('now')
+             GROUP BY key ORDER BY c DESC LIMIT 10`
+        ).bind(fromDay).all(),
         // Top paths
         env.DB.prepare(
-            `SELECT path, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours') GROUP BY path ORDER BY c DESC LIMIT 10`
-        ).bind(interval).all(),
+            `SELECT key path, SUM(count) c FROM stats_daily
+             WHERE dim = 'path' AND day >= date('now', ?) AND day < date('now')
+             GROUP BY key ORDER BY c DESC LIMIT 10`
+        ).bind(fromDay).all(),
         // Top ASNs
         env.DB.prepare(
-            `SELECT asn, MAX(as_organization) as_organization, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours') AND asn IS NOT NULL GROUP BY asn ORDER BY c DESC LIMIT 10`
-        ).bind(interval).all(),
-        // Top usernames (no passwords)
+            `SELECT CAST(key AS INTEGER) asn, MAX(extra) as_organization, SUM(count) c
+             FROM stats_daily
+             WHERE dim = 'asn' AND day >= date('now', ?) AND day < date('now')
+             GROUP BY key ORDER BY c DESC LIMIT 10`
+        ).bind(fromDay).all(),
+        // Top usernames
         env.DB.prepare(
-            `SELECT username, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours') AND username IS NOT NULL GROUP BY username ORDER BY c DESC LIMIT 10`
-        ).bind(interval).all(),
-        // Top TLS versions
+            `SELECT key username, SUM(count) c FROM stats_daily
+             WHERE dim = 'username' AND day >= date('now', ?) AND day < date('now')
+             GROUP BY key ORDER BY c DESC LIMIT 10`
+        ).bind(fromDay).all(),
+        // Top TLS
         env.DB.prepare(
-            `SELECT tls_version, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours') AND tls_version IS NOT NULL GROUP BY tls_version ORDER BY c DESC LIMIT 6`
-        ).bind(interval).all(),
-        // Top HTTP protocols
+            `SELECT key tls_version, SUM(count) c FROM stats_daily
+             WHERE dim = 'tls' AND day >= date('now', ?) AND day < date('now')
+             GROUP BY key ORDER BY c DESC LIMIT 6`
+        ).bind(fromDay).all(),
+        // Top protocols
         env.DB.prepare(
-            `SELECT http_protocol, COUNT(*) c FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours') AND http_protocol IS NOT NULL GROUP BY http_protocol ORDER BY c DESC LIMIT 6`
-        ).bind(interval).all(),
+            `SELECT key http_protocol, SUM(count) c FROM stats_daily
+             WHERE dim = 'protocol' AND day >= date('now', ?) AND day < date('now')
+             GROUP BY key ORDER BY c DESC LIMIT 6`
+        ).bind(fromDay).all(),
         // Distinct country count
         env.DB.prepare(
-            `SELECT COUNT(DISTINCT country) total FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours')`
-        ).bind(interval).first(),
+            `SELECT COUNT(DISTINCT key) total FROM stats_daily
+             WHERE dim = 'country' AND day >= date('now', ?) AND day < date('now')`
+        ).bind(fromDay).first(),
         // Distinct service count
         env.DB.prepare(
-            `SELECT COUNT(DISTINCT service) total FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours')`
-        ).bind(interval).first(),
-        // Distinct username count (not capped, unlike top_usernames)
+            `SELECT COUNT(DISTINCT key) total FROM stats_daily
+             WHERE dim = 'service' AND day >= date('now', ?) AND day < date('now')`
+        ).bind(fromDay).first(),
+        // Distinct username count
         env.DB.prepare(
-            `SELECT COUNT(DISTINCT username) total FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours') AND username IS NOT NULL`
-        ).bind(interval).first(),
-        // Total count
+            `SELECT COUNT(DISTINCT key) total FROM stats_daily
+             WHERE dim = 'username' AND day >= date('now', ?) AND day < date('now')`
+        ).bind(fromDay).first(),
+        // Total events
         env.DB.prepare(
-            `SELECT COUNT(*) total FROM events WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours')`
-        ).bind(interval).first(),
-        // Daily campaign count (confirmed campaigns first seen each day)
+            `SELECT SUM(count) total FROM stats_daily
+             WHERE dim = 'volume' AND day >= date('now', ?) AND day < date('now')`
+        ).bind(fromDay).first(),
+        // Daily campaign count
         env.DB.prepare(
-            `SELECT date(first_seen_at) d, COUNT(*) c FROM campaigns WHERE first_seen_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?) AND first_seen_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours') GROUP BY d ORDER BY d ASC`
-        ).bind(interval).all(),
+            `SELECT day d, count c FROM stats_daily
+             WHERE dim = 'campaign_volume' AND day >= date('now', ?) AND day < date('now')
+             ORDER BY day ASC`
+        ).bind(fromDay).all(),
     ];
 
     const [volume, topCountries, topServices, topPaths, topAsns, topUsernames, topTls, topProtocols, totalCountries, totalServices, totalUsernames, total, campaignVolume] =
@@ -176,7 +200,7 @@ export async function statsApiHandler(request, env, isPrivate) {
         payload.top_hosts = topHosts.results;
     }
 
-    const ttl = isPrivate ? 120 : 900;
+    const ttl = isPrivate ? 120 : 21600; // 2 min for private, 6 hours for public (bucketed)
     const cacheResponse = new Response(JSON.stringify(payload), {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': `s-maxage=${ttl}` },
     });

@@ -95,3 +95,19 @@ CREATE TABLE IF NOT EXISTS pending_campaigns (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pending_last_seen ON pending_campaigns(last_seen_at);
+
+-- -- Daily rollups -------------------------------------------
+-- Pre-aggregated counts per (day, dimension, key). Written by
+-- the 4am cron for the previous day; backfilled one-shot from
+-- historical events. All public stats queries read from here.
+
+CREATE TABLE IF NOT EXISTS stats_daily (
+  day   TEXT    NOT NULL,   -- YYYY-MM-DD UTC
+  dim   TEXT    NOT NULL,   -- volume|country|service|path|asn|username|tls|protocol|campaign_volume
+  key   TEXT    NOT NULL,   -- dimension value; '' for volume/campaign_volume
+  extra TEXT,               -- side-channel (asn -> as_organization)
+  count INTEGER NOT NULL,
+  PRIMARY KEY (day, dim, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stats_daily_dim_day ON stats_daily(dim, day);

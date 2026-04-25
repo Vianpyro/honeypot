@@ -7,6 +7,7 @@ import { notFound } from './helpers.js';
 import { logEvent } from './logger.js';
 import { statsHandler, statsApiHandler } from './stats.js';
 import { simulators } from './simulators.js';
+import { aggregateDay, yesterdayUTC } from './aggregate.js';
 
 const SIMULATORS = [
     { label: 'wordpress', pattern: /^\/{1,2}(?:[\w-]+\/)?(wp-admin|wp-login\.php|xmlrpc\.php|wp-json|wp-content|wp-includes)/ },
@@ -45,6 +46,9 @@ const IGNORE_PATHS = [
 
 // Retention: 366 days — well within D1 free tier (~730 MB/year at 1000 req/day, 5 GB limit)
 const RETENTION_DAYS = 366;
+// Pending rows whose 10-min bucket has long since closed are dead weight.
+// 1 bucket + 50 min buffer absorbs cron latency.
+const PENDING_STALE_HOURS = 1;
 
 async function safeCompare(a, b) {
     if (!a || !b) return false;
@@ -61,6 +65,7 @@ async function safeCompare(a, b) {
 async function handleCron(cron, env) {
     switch (cron) {
         case '0 4 * * *':
+            await aggregateDay(yesterdayUTC(), env);
             return cleanupOldEntries(env);
         default:
             console.warn(`[cron] unhandled expression: ${cron}`);
@@ -69,12 +74,36 @@ async function handleCron(cron, env) {
 }
 
 async function cleanupOldEntries(env) {
+    // Order matters: prune parents first so orphan sweeps find them gone.
+    // D1 batch is transactional; each stmt sees prior stmts' changes.
     try {
-        const result = await env.DB.prepare(
-            `DELETE FROM events WHERE created_at < datetime('now', ?)`
-        ).bind(`-${RETENTION_DAYS} days`).run();
-        console.log(`[retention] ${result.meta.changes} rows deleted`);
-        return result;
+        const results = await env.DB.batch([
+            env.DB.prepare(
+                `DELETE FROM events WHERE created_at < datetime('now', ?)`
+            ).bind(`-${RETENTION_DAYS} days`),
+
+            env.DB.prepare(
+                `DELETE FROM campaigns WHERE last_seen_at < datetime('now', ?)`
+            ).bind(`-${RETENTION_DAYS} days`),
+
+            env.DB.prepare(
+                `DELETE FROM pending_campaigns WHERE last_seen_at < datetime('now', ?)`
+            ).bind(`-${PENDING_STALE_HOURS} hours`),
+
+            env.DB.prepare(
+                `DELETE FROM campaign_events WHERE event_id    NOT IN (SELECT id FROM events) OR campaign_id NOT IN (SELECT id FROM campaigns)`
+            ),
+            // Welford rows are orphaned once no campaign or pending references
+            // their hash. Safe to drop; future events recreate on demand.
+            env.DB.prepare(
+                `DELETE FROM campaign_path_stats WHERE path_seq_hash NOT IN (SELECT path_seq_hash FROM campaigns) AND path_seq_hash NOT IN (SELECT path_seq_hash FROM pending_campaigns)`
+            ),
+        ]);
+        const c = results.map(r => r.meta?.changes ?? 0);
+        console.log(
+            `[retention] events=${c[0]} campaigns=${c[1]} ` +
+            `pending=${c[2]} orphan_joins=${c[3]} stats=${c[4]}`
+        );
     } catch (e) {
         console.error('[retention] cleanup failed:', e.message);
     }
