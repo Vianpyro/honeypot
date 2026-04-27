@@ -109,6 +109,14 @@ async function cleanupOldEntries(env) {
     }
 }
 
+function isMonitoring(hostname, pathname, env) {
+    if (hostname === 'api.pennygame.thevhome.com') return pathname === '/health';
+    if (hostname !== 'cloud.thevhome.com') return false;
+    if (pathname === '/heartbeat') return true;
+    const token = env.MONITORING_NEXTCLOUD_TOKEN;
+    return Boolean(token) && pathname === `/s/${token}`;
+}
+
 export default {
 
     async scheduled(event, env, ctx) {
@@ -117,6 +125,11 @@ export default {
 
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
+        if (isMonitoring(url.hostname, url.pathname, env)) {
+            return fetch(request, {
+                cf: { resolveOverride: new URL(env.NGINX_ORIGIN).hostname },
+            });
+        }
 
         // ── Legacy private stats endpoint ─────────────────────────
         if (url.pathname.startsWith('/hp-stats')) {
