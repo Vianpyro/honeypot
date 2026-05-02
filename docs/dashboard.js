@@ -30,7 +30,7 @@ function escHtml(s) {
         .replace(/"/g, '&quot;');
 }
 
-function renderRankList(listId, items, labelFn, max) {
+function renderRankList(listId, items, labelFn, max, startIndex = 0) {
     const ul = el(listId);
     if (!items?.length) {
         ul.innerHTML = '<li class="loading">no data</li>';
@@ -38,7 +38,7 @@ function renderRankList(listId, items, labelFn, max) {
     }
     ul.innerHTML = items.map((item, i) => `
         <li class="rank-item">
-            <span class="rank-n">${i + 1}</span>
+            <span class="rank-n">${i + startIndex + 1}</span>
             <div class="rank-bar-wrap">
                 <div class="rank-bar-bg"></div>
                 <div class="rank-bar-fill" style="width:${Math.round((item.c / max) * 100)}%"></div>
@@ -182,7 +182,7 @@ async function load(days) {
         renderRankList('list-usernames-a', usernames.slice(0, half),
             item => item.username, maxU);
         renderRankList('list-usernames-b', usernames.slice(half),
-            item => item.username, maxU);
+            item => item.username, maxU, half);
 
     } catch (e) {
         el('hdr-status').textContent = 'honeypot unreachable';
