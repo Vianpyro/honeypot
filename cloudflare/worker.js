@@ -10,6 +10,9 @@ import { simulators } from './simulators.js';
 import { aggregateDay, yesterdayUTC } from './aggregate.js';
 import { reportToAbuseIPDB } from './reporter.js';
 
+// AbuseIPDB webmaster verification token
+const ABUSEIPDB_VERIFICATION_TOKEN = 'abuseipdb-verification-IiFYYT9g';
+
 const SIMULATORS = [
     { label: 'wordpress', pattern: /^\/{1,2}(?:[\w-]+\/)?(wp-admin|wp-login\.php|xmlrpc\.php|wp-json|wp-content|wp-includes)/ },
     { label: 'phpmyadmin', pattern: /^\/(phpmyadmin|pma|phpMyAdmin)/ },
@@ -43,6 +46,7 @@ const IGNORE_PATHS = [
     '/.well-known/dmarc-policy',
     '/apple-touch-icon.png',
     '/android-chrome-icon.png',
+    '/abuseipdb-verification.html',
 ];
 
 // Retention: 366 days — well within D1 free tier (~730 MB/year at 1000 req/day, 5 GB limit)
@@ -131,6 +135,12 @@ export default {
         if (isMonitoring(url.hostname, url.pathname, env)) {
             return fetch(request, {
                 cf: { resolveOverride: new URL(env.NGINX_ORIGIN).hostname },
+            });
+        }
+
+        if (url.pathname === '/abuseipdb-verification.html') {
+            return new Response(ABUSEIPDB_VERIFICATION_TOKEN, {
+                headers: { 'Content-Type': 'text/html' },
             });
         }
 
