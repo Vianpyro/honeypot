@@ -1,46 +1,39 @@
 // ============================================================
-//  reporter.js — Nightly AbuseIPDB submission
+//  reporter.js — Nightly AbuseIPDB bulk submission
 //
-//  Runs at midnight UTC, before the 4am aggregation cron.
-//  Reports on events from the previous 24h window.
-//  Groups events from the past 24h by IP, skips IPs already
-//  reported today, and submits one report per novel IP.
+//  Runs at midnight UTC (before the 4am aggregation cron).
+//  Aggregates events from the past 24h into a single CSV and
+//  submits via /api/v2/bulk-report (1 call, up to 10 000 IPs).
 //
-//  AbuseIPDB Webmaster tier: 500 reports/day, 1 report/IP/15 min.
-//  D1 tracks submissions so re-runs are safe (idempotent).
+//  AbuseIPDB Webmaster tier: 10 bulk-report calls/day (10k IPs each).
+//  D1 tracks submissions per IP per day -- re-runs are idempotent.
 //
 //  Required secrets: ABUSEIPDB_KEY
 //  Required binding: DB (D1, shared with honeypot worker)
 // ============================================================
 
-const ABUSEIPDB_REPORT_URL = 'https://api.abuseipdb.com/api/v2/report';
+const ABUSEIPDB_BULK_URL = 'https://api.abuseipdb.com/api/v2/bulk-report';
 
-// AbuseIPDB category codes
 const CAT_BRUTE_FORCE = 18;
-const CAT_WEB_APP_ATTACK = 21;
 const CAT_PORT_SCAN = 14;
+const CAT_WEB_APP_ATTACK = 21;
 
-const DAILY_REPORT_CAP = 500;
-
-// IPs that should never be submitted (legitimate scanners, monitoring)
+// Legitimate scanners -- never submitted.
 const ALLOWLIST_ASNS = new Set([
-    // LeakIX
-    14061,
-    // Shodan
-    20473,
+    14061,  // DigitalOcean / LeakIX
+    20473,  // Shodan (Vultr)
+    398705, // Censys
 ]);
 
-// ── Category selection ───────────────────────────────────────
+// -- Helpers --------------------------------------------------
 
-// Invariant: every service maps to at least one category.
-function categoriesFor(services) {
-    const cats = new Set();
-    for (const svc of services) {
-        if (['login', 'wordpress', 'phpmyadmin', 'admin', 'vpn', 'mail'].includes(svc)) {
+function categoriesFor(servicesStr) {
+    const cats = new Set([CAT_WEB_APP_ATTACK]);
+    for (const svc of servicesStr.split(',')) {
+        if (['login', 'wordpress', 'phpmyadmin', 'admin', 'vpn', 'mail'].includes(svc.trim())) {
             cats.add(CAT_BRUTE_FORCE);
         }
-        cats.add(CAT_WEB_APP_ATTACK);
-        if (['catch-all', 'sensitive', 'infra'].includes(svc)) {
+        if (['catch-all', 'sensitive', 'infra'].includes(svc.trim())) {
             cats.add(CAT_PORT_SCAN);
         }
     }
@@ -48,37 +41,63 @@ function categoriesFor(services) {
 }
 
 function buildComment(row) {
-    const services = row.services.split(',').map(s => s.trim());
     const parts = [
-        `Honeypot hit: ${row.event_count} request(s) over ${row.duration_minutes} min.`,
-        `Services probed: ${services.join(', ')}.`,
+        `Honeypot: ${row.event_count} request(s) in ${row.duration_minutes ?? 0} min.`,
+        `Services: ${row.services}.`,
         `ASN: ${row.asn} (${row.as_organization ?? 'unknown'}).`,
     ];
-    if (row.submitted_creds) {
-        parts.push('Submitted credentials (credential stuffing).');
-    }
-    if (row.used_encoding) {
-        parts.push('Used URL-encoding evasion variants.');
-    }
-    parts.push('Source: automated honeypot (thevhome.com).');
-    return parts.join(' ');
+    if (row.submitted_creds) parts.push('Credential stuffing observed.');
+    if (row.used_encoding) parts.push('URL-encoding WAF evasion detected.');
+    parts.push('Source: honeypot (thevhome.com).');
+    return parts.join(' ').slice(0, 1024);
 }
 
-// ── Submission ───────────────────────────────────────────────
+// Quotes the field if it contains a comma or double-quote.
+function csvField(value) {
+    const str = String(value ?? '');
+    return str.includes(',') || str.includes('"')
+        ? `"${str.replace(/"/g, '""')}"`
+        : str;
+}
 
-async function submitIP(ip, categories, comment, apiKey) {
-    const body = new URLSearchParams({
-        ip,
-        categories: categories.join(','),
-        comment: comment.slice(0, 1024),
-    });
-    const res = await fetch(ABUSEIPDB_REPORT_URL, {
+// -- CSV builder ----------------------------------------------
+
+// Returns { csv: string, rows: Array<{ip, categories, event_count}> }.
+// Invariant: one row per IP, deduplicated against `alreadyDone`.
+function buildCSV(candidates, alreadyDone) {
+    const rows = [];
+    const lines = ['IP,Categories,ReportDate,Comment'];
+
+    for (const row of candidates) {
+        if (alreadyDone.has(row.ip) || ALLOWLIST_ASNS.has(row.asn)) continue;
+
+        const cats = categoriesFor(row.services);
+        lines.push([
+            csvField(row.ip),
+            csvField(cats.join(',')),
+            csvField(row.first_seen_at),
+            csvField(buildComment(row)),
+        ].join(','));
+
+        rows.push({ ip: row.ip, categories: cats.join(','), event_count: row.event_count });
+    }
+
+    return { csv: lines.join('\n'), rows };
+}
+
+// -- Submission -----------------------------------------------
+
+async function submitBulk(csvContent, apiKey) {
+    const form = new FormData();
+    form.append('csv', new Blob([csvContent], { type: 'text/csv' }), 'report.csv');
+
+    const res = await fetch(ABUSEIPDB_BULK_URL, {
         method: 'POST',
         headers: {
             Key: apiKey,
             Accept: 'application/json',
         },
-        body,
+        body: form,
     });
 
     if (!res.ok) {
@@ -88,7 +107,17 @@ async function submitIP(ip, categories, comment, apiKey) {
     return res.json();
 }
 
-// ── Main export ──────────────────────────────────────────────
+async function recordSubmissions(env, rows, today) {
+    if (!rows.length) return;
+    await env.DB.batch(rows.map(r =>
+        env.DB.prepare(
+            `INSERT OR IGNORE INTO abuseipdb_submissions (ip, submitted_on, event_count, categories)
+             VALUES (?, ?, ?, ?)`
+        ).bind(r.ip, today, r.event_count, r.categories)
+    ));
+}
+
+// -- Main export ----------------------------------------------
 
 export async function reportToAbuseIPDB(env) {
     if (!env.ABUSEIPDB_KEY) {
@@ -96,7 +125,6 @@ export async function reportToAbuseIPDB(env) {
         return;
     }
 
-    // Aggregate past 24h: one row per IP with attack profile
     const { results: candidates } = await env.DB.prepare(`
         SELECT
             e.ip,
@@ -104,9 +132,10 @@ export async function reportToAbuseIPDB(env) {
             e.as_organization,
             COUNT(*)                                    AS event_count,
             GROUP_CONCAT(DISTINCT e.service)            AS services,
+            MIN(e.created_at)                           AS first_seen_at,
             CAST(
-              (julianday(MAX(e.created_at)) - julianday(MIN(e.created_at)))
-              * 1440 AS INTEGER
+                (julianday(MAX(e.created_at)) - julianday(MIN(e.created_at)))
+                * 1440 AS INTEGER
             )                                           AS duration_minutes,
             MAX(CASE WHEN e.username IS NOT NULL THEN 1 ELSE 0 END) AS submitted_creds,
             MAX(CASE WHEN e.path LIKE '%25%' OR e.path LIKE '%2e%' OR e.path LIKE '%2f%'
@@ -119,48 +148,32 @@ export async function reportToAbuseIPDB(env) {
     `).all();
 
     if (!candidates.length) {
-        console.log('[reporter] no candidates for submission');
+        console.log('[reporter] no candidates');
         return;
     }
 
-    // Filter IPs already submitted today to stay idempotent
     const today = new Date().toISOString().slice(0, 10);
-    const { results: alreadyDone } = await env.DB.prepare(`
-        SELECT ip FROM abuseipdb_submissions
-        WHERE submitted_on = ?
-    `).bind(today).all();
-    const done = new Set(alreadyDone.map(r => r.ip));
+    const { results: done } = await env.DB.prepare(
+        `SELECT ip FROM abuseipdb_submissions WHERE submitted_on = ?`
+    ).bind(today).all();
+    const alreadyDone = new Set(done.map(r => r.ip));
 
-    let submitted = 0;
-    let skipped = 0;
-    let errors = 0;
-
-    for (const row of candidates) {
-        if (submitted >= DAILY_REPORT_CAP) {
-            console.warn('[reporter] daily cap reached, stopping');
-            break;
-        }
-        if (done.has(row.ip) || ALLOWLIST_ASNS.has(row.asn)) {
-            skipped++;
-            continue;
-        }
-
-        const services = row.services.split(',').map(s => s.trim());
-        const categories = categoriesFor(services);
-        const comment = buildComment(row);
-
-        try {
-            await submitIP(row.ip, categories, comment, env.ABUSEIPDB_KEY);
-            await env.DB.prepare(`
-                INSERT OR IGNORE INTO abuseipdb_submissions (ip, submitted_on, event_count, categories)
-                VALUES (?, ?, ?, ?)
-            `).bind(row.ip, today, row.event_count, categories.join(',')).run();
-            submitted++;
-        } catch (e) {
-            console.error(`[reporter] failed for ${row.ip}:`, e.message);
-            errors++;
-        }
+    const { csv, rows } = buildCSV(candidates, alreadyDone);
+    if (!rows.length) {
+        console.log('[reporter] all candidates already submitted today');
+        return;
     }
 
-    console.log(`[reporter] submitted=${submitted} skipped=${skipped} errors=${errors}`);
+    try {
+        const result = await submitBulk(csv, env.ABUSEIPDB_KEY);
+        const saved = result?.data?.savedReports ?? 0;
+        const invalid = result?.data?.invalidReports ?? [];
+        console.log(`[reporter] saved=${saved} invalid=${invalid.length} total=${rows.length}`);
+        if (invalid.length) {
+            console.warn('[reporter] invalid reports:', JSON.stringify(invalid));
+        }
+        await recordSubmissions(env, rows, today);
+    } catch (e) {
+        console.error('[reporter] bulk submission failed:', e.message);
+    }
 }
