@@ -8,7 +8,7 @@ Currently captures ~1 000–12 000 events/day across 45+ countries with zero inf
   <img src="https://www.abuseipdb.com/contributor/298048.svg" alt="AbuseIPDB Contributor Badge" style="width: 401px;">
 </a>
 
-**[Live dashboard](https://vianpyro.github.io)** — public, updated every 6-24 hours.
+**[Live dashboard](https://vianpyro.github.io/honeypot)** — public, updated every 6-24 hours.
 
 ---
 
