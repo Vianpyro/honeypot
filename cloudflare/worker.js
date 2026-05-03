@@ -8,6 +8,7 @@ import { logEvent } from './logger.js';
 import { statsHandler, statsApiHandler } from './stats.js';
 import { simulators } from './simulators.js';
 import { aggregateDay, yesterdayUTC } from './aggregate.js';
+import { reportToAbuseIPDB } from './reporter.js';
 
 const SIMULATORS = [
     { label: 'wordpress', pattern: /^\/{1,2}(?:[\w-]+\/)?(wp-admin|wp-login\.php|xmlrpc\.php|wp-json|wp-content|wp-includes)/ },
@@ -64,9 +65,11 @@ async function safeCompare(a, b) {
 
 async function handleCron(cron, env) {
     switch (cron) {
-        case '0 4 * * *':
+        case '0 0 * * *':
             await aggregateDay(yesterdayUTC(), env);
             return cleanupOldEntries(env);
+        case '0 4 * * *':
+            return reportToAbuseIPDB(env);
         default:
             console.warn(`[cron] unhandled expression: ${cron}`);
             return;

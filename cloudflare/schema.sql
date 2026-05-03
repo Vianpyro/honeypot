@@ -111,3 +111,13 @@ CREATE TABLE IF NOT EXISTS stats_daily (
 );
 
 CREATE INDEX IF NOT EXISTS idx_stats_daily_dim_day ON stats_daily(dim, day);
+
+CREATE TABLE IF NOT EXISTS abuseipdb_submissions (
+  ip           TEXT    NOT NULL,
+  submitted_on TEXT    NOT NULL,   -- YYYY-MM-DD UTC
+  event_count  INTEGER NOT NULL,
+  categories   TEXT    NOT NULL,   -- comma-separated AbuseIPDB category codes
+  PRIMARY KEY (ip, submitted_on)
+);
+
+CREATE INDEX IF NOT EXISTS idx_abuseipdb_submitted_on ON abuseipdb_submissions(submitted_on);
