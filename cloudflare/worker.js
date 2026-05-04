@@ -20,7 +20,7 @@ const SIMULATORS = [
     { label: 'login', pattern: /^\/(login|signin|sign-in|log-in|logon|login\.action)(\/|$|\?)/ },
     { label: 'springboot', pattern: /^\/(actuator|v2\/api-docs|v3\/api-docs|webjars\/swagger-ui|swagger-ui\.html|api-docs|swagger\/v[0-9]+\/swagger\.json)/ },
     { label: 'skimmer', pattern: /\/(twint|lkk|qr_modal|bot-connect|support_parent|sys_files|protect)(\.js|\.css)?$/ },
-    { label: 'infra', pattern: /^\/(terraform\.|docker-compose|\.aws\/|\.docker\/|id_rsa|export\.sql|sftp-config|opencode|service-account|google-credentials|google-services|firebase-adminsdk|app\/config\/parameters|v2\/_catalog)/ },
+    { label: 'infra', pattern: /^\/(terraform\.|docker-compose|\.aws\/|\.docker\/|id_rsa|export\.sql|sftp-config|opencode|service-account|google-credentials|google-services|firebase-adminsdk|app\/config\/parameters|v2\/_catalog|db\.sql|dump\.sql|db_backup\.sql|database\.sql|backup\.sql|mysql\.sql|sql\/|backup\/.*\.sql|\.runtimeconfig\.json)/ },
     { label: 'php', pattern: /^\/(info\.php|phpinfo\.php|pinfo\.php|test\.php|php\.php|i\.php)(\/|$|\?)/ },
     { label: 'mail', pattern: /^\/(webmail|roundcube|squirrelmail|horde|rainloop|mail|owa|exchange|autodiscover|remote)(\/|$)/ },
     { label: 'vpn', pattern: /^\/(vpn|remote|sslvpn|citrix|pulse|fortivpn|globalprotect|dana-na|\+CSCOE\+|remote\/login)(\/|$)/ },

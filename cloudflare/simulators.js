@@ -6,7 +6,7 @@ import { html, json, plain, phpHeaders } from './helpers.js';
 import {
     wpLoginPage, fakeEnvFile, fakeConfigJson, CTF_FLAG, GUEST_JWT, FAKE_GIT_REMOTE, FAKE_PHP_DB_PASSWORD,
     fakeTerraformState, fakeTerraformVars, fakeDockerCompose, fakeAwsCredentials, fakeGcpServiceAccount,
-    fakeSshKey, fakeSymfonyParameters, FAKE_PHP_ENV_ROWS, fakeJsConfig, FAKE_DB_USER
+    fakeSshKey, fakeSymfonyParameters, FAKE_PHP_ENV_ROWS, fakeJsConfig, FAKE_DB_USER, fakeSqlDump, fakeFirebaseRuntimeConfig,
 } from './content.js';
 
 export const simulators = {
