@@ -22,9 +22,13 @@ const CAT_WEB_APP_ATTACK = 21;
 
 // Legitimate scanners -- never submitted.
 const ALLOWLIST_ASNS = new Set([
+    13335,  // Cloudflare
+    132892, // Cloudflare
     14061,  // DigitalOcean / LeakIX
     20473,  // Shodan (Vultr)
     398705, // Censys
+    396982, // Google Cloud (GCP)
+    15169,  // Google
 ]);
 
 // -- Helpers --------------------------------------------------
