@@ -27,7 +27,7 @@ const ALLOWLIST_ASNS = new Set([
     14061,  // DigitalOcean / LeakIX
     20473,  // Shodan (Vultr)
     398705, // Censys
-    396982, // Google Cloud (GCP)
+    // 396982, // Google Cloud (GCP) -- includes some noisy IPs, but also some legit ones, so left out for now
     15169,  // Google
 ]);
 
