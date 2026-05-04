@@ -48,13 +48,15 @@ function categoriesFor(servicesStr) {
 function buildComment(row) {
     const parts = [
         `Honeypot: ${row.event_count} request(s) in ${row.duration_minutes ?? 0} min.`,
-        `Services: ${row.services}.`,
+        `Paths: ${row.paths?.split(',').slice(0, 5).join(', ')}.`,
+        `Method(s): ${row.methods}.`,
+        row.ua ? `UA: ${row.ua.slice(0, 80)}.` : null,
         `ASN: ${row.asn} (${row.as_organization ?? 'unknown'}).`,
     ];
     if (row.submitted_creds) parts.push('Credential stuffing observed.');
     if (row.used_encoding) parts.push('URL-encoding WAF evasion detected.');
-    parts.push('Source: honeypot (thevhome.com).');
-    return parts.join(' ').slice(0, 1024);
+    parts.push('Source: thevhome.com');
+    return parts.filter(Boolean).join(' ').slice(0, 1024);
 }
 
 // Quotes the field if it contains a comma or double-quote.
@@ -138,6 +140,9 @@ export async function reportToAbuseIPDB(env) {
             COUNT(*)                                    AS event_count,
             GROUP_CONCAT(DISTINCT e.service)            AS services,
             MIN(e.created_at)                           AS first_seen_at,
+            GROUP_CONCAT(DISTINCT e.path)               AS paths,
+            MAX(e.ua)                                   AS ua,
+            GROUP_CONCAT(DISTINCT e.method)             AS methods,
             CAST(
                 (julianday(MAX(e.created_at)) - julianday(MIN(e.created_at)))
                 * 1440 AS INTEGER
