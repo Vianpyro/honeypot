@@ -14,7 +14,9 @@
 
 const ABUSEIPDB_BULK_URL = 'https://api.abuseipdb.com/api/v2/bulk-report';
 
+const CAT_BAD_WEB_BOT = 19;
 const CAT_BRUTE_FORCE = 18;
+const CAT_HACKING = 15;
 const CAT_PORT_SCAN = 14;
 const CAT_WEB_APP_ATTACK = 21;
 
@@ -28,13 +30,16 @@ const ALLOWLIST_ASNS = new Set([
 // -- Helpers --------------------------------------------------
 
 function categoriesFor(servicesStr) {
-    const cats = new Set([CAT_WEB_APP_ATTACK]);
+    const cats = new Set([CAT_WEB_APP_ATTACK, CAT_BAD_WEB_BOT]);
     for (const svc of servicesStr.split(',')) {
         if (['login', 'wordpress', 'phpmyadmin', 'admin', 'vpn', 'mail'].includes(svc.trim())) {
             cats.add(CAT_BRUTE_FORCE);
         }
         if (['catch-all', 'sensitive', 'infra'].includes(svc.trim())) {
             cats.add(CAT_PORT_SCAN);
+        }
+        if (['sensitive', 'infra', 'graphql', 'springboot', 'api'].includes(svc.trim())) {
+            cats.add(CAT_HACKING);
         }
     }
     return [...cats];
