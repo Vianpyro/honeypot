@@ -2,7 +2,7 @@
 //  reporter.js — Nightly AbuseIPDB bulk submission
 //
 //  Runs at midnight UTC (before the 4am aggregation cron).
-//  Aggregates events from the past 24h into a single CSV and
+//  Aggregates events from the past 48h into a single CSV and
 //  submits via /api/v2/bulk-report (1 call, up to 10 000 IPs).
 //
 //  AbuseIPDB Webmaster tier: 10 bulk-report calls/day (10k IPs each).
@@ -59,7 +59,6 @@ function buildComment(row) {
     ];
     if (row.submitted_creds) parts.push('Credential stuffing observed.');
     if (row.used_encoding) parts.push('URL-encoding WAF evasion detected.');
-    parts.push('Source: thevhome.com');
     return parts.filter(Boolean).join(' ').slice(0, 1024);
 }
 
@@ -155,7 +154,7 @@ export async function reportToAbuseIPDB(env) {
             MAX(CASE WHEN e.path LIKE '%25%' OR e.path LIKE '%2e%' OR e.path LIKE '%2f%'
                      THEN 1 ELSE 0 END)                AS used_encoding
         FROM events e
-        WHERE e.created_at >= datetime('now', '-1 day')
+        WHERE e.created_at >= datetime('now', '-2 day')
           AND e.ip != 'unknown'
         GROUP BY e.ip, e.asn, e.as_organization
         HAVING COUNT(*) >= 5

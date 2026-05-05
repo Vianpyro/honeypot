@@ -72,7 +72,7 @@ async function handleCron(cron, env) {
         case '0 0 * * *':
             await aggregateDay(yesterdayUTC(), env);
             return cleanupOldEntries(env);
-        case '0 4 * * *':
+        case '0 1 * * *':
             return reportToAbuseIPDB(env);
         default:
             console.warn(`[cron] unhandled expression: ${cron}`);
