@@ -154,7 +154,7 @@ export async function reportToAbuseIPDB(env) {
             MAX(CASE WHEN e.path LIKE '%25%' OR e.path LIKE '%2e%' OR e.path LIKE '%2f%'
                      THEN 1 ELSE 0 END)                AS used_encoding
         FROM events e
-        WHERE e.created_at >= datetime('now', '-2 day')
+        WHERE e.created_at >= datetime('now', '-2 days')
           AND e.ip != 'unknown'
         GROUP BY e.ip, e.asn, e.as_organization
         HAVING COUNT(*) >= 5
