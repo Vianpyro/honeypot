@@ -149,10 +149,10 @@ export async function reportToAbuseIPDB(env) {
             CAST(
                 (julianday(MAX(e.created_at)) - julianday(MIN(e.created_at)))
                 * 1440 AS INTEGER
-            )                                           AS duration_minutes,
+            ) AS duration_minutes,
             MAX(CASE WHEN e.username IS NOT NULL THEN 1 ELSE 0 END) AS submitted_creds,
             MAX(CASE WHEN e.path LIKE '%25%' OR e.path LIKE '%2e%' OR e.path LIKE '%2f%'
-                     THEN 1 ELSE 0 END)                AS used_encoding
+                     THEN 1 ELSE 0 END) AS used_encoding
         FROM events e
         WHERE e.created_at >= datetime('now', '-2 days')
           AND e.ip != 'unknown'
