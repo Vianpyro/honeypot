@@ -17,7 +17,6 @@ const ABUSEIPDB_BULK_URL = 'https://api.abuseipdb.com/api/v2/bulk-report';
 const CAT_BAD_WEB_BOT = 19;
 const CAT_BRUTE_FORCE = 18;
 const CAT_HACKING = 15;
-const CAT_PORT_SCAN = 14;
 const CAT_WEB_APP_ATTACK = 21;
 
 // Legitimate scanners -- never submitted.
@@ -42,7 +41,7 @@ function categoriesFor(servicesStr) {
         if (['catch-all', 'sensitive', 'infra'].includes(svc.trim())) {
             cats.add(CAT_PORT_SCAN);
         }
-        if (['sensitive', 'infra', 'graphql', 'springboot', 'api'].includes(svc.trim())) {
+        if (['catch-all', 'sensitive', 'infra', 'graphql', 'springboot', 'api'].includes(svc.trim())) {
             cats.add(CAT_HACKING);
         }
     }
@@ -77,9 +76,11 @@ function csvField(value) {
 function buildCSV(candidates, alreadyDone) {
     const rows = [];
     const lines = ['IP,Categories,ReportDate,Comment'];
+    const seen = new Set();
 
     for (const row of candidates) {
-        if (alreadyDone.has(row.ip) || ALLOWLIST_ASNS.has(row.asn)) continue;
+        if (alreadyDone.has(row.ip) || seen.has(row.ip) || ALLOWLIST_ASNS.has(row.asn)) continue;
+        seen.add(row.ip);
 
         const cats = categoriesFor(row.services);
         lines.push([
@@ -139,7 +140,7 @@ export async function reportToAbuseIPDB(env) {
         SELECT
             e.ip,
             e.asn,
-            e.as_organization,
+            MAX(e.as_organization)                      AS as_organization,
             COUNT(*)                                    AS event_count,
             GROUP_CONCAT(DISTINCT e.service)            AS services,
             MIN(e.created_at)                           AS first_seen_at,
@@ -156,7 +157,7 @@ export async function reportToAbuseIPDB(env) {
         FROM events e
         WHERE e.created_at >= datetime('now', '-2 days')
           AND e.ip != 'unknown'
-        GROUP BY e.ip, e.asn, e.as_organization
+        GROUP BY e.ip
         HAVING COUNT(*) >= 5
     `).all();
 
@@ -167,8 +168,8 @@ export async function reportToAbuseIPDB(env) {
 
     const today = new Date().toISOString().slice(0, 10);
     const { results: done } = await env.DB.prepare(
-        `SELECT ip FROM abuseipdb_submissions WHERE submitted_on = ?`
-    ).bind(today).all();
+        `SELECT ip FROM abuseipdb_submissions WHERE submitted_on >= date('now', '-2 days')`
+    ).all();
     const alreadyDone = new Set(done.map(r => r.ip));
 
     const { csv, rows } = buildCSV(candidates, alreadyDone);
