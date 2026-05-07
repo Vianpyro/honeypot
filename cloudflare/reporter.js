@@ -38,9 +38,6 @@ function categoriesFor(servicesStr) {
         if (['login', 'wordpress', 'phpmyadmin', 'admin', 'vpn', 'mail'].includes(svc.trim())) {
             cats.add(CAT_BRUTE_FORCE);
         }
-        if (['catch-all', 'sensitive', 'infra'].includes(svc.trim())) {
-            cats.add(CAT_PORT_SCAN);
-        }
         if (['catch-all', 'sensitive', 'infra', 'graphql', 'springboot', 'api'].includes(svc.trim())) {
             cats.add(CAT_HACKING);
         }
