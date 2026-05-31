@@ -199,5 +199,5 @@ document.addEventListener('DOMContentLoaded', () => {
     const daysSelect = el('days-select');
     el('btn-refresh').addEventListener('click', () => load(parseInt(daysSelect.value)));
     daysSelect.addEventListener('change', () => load(parseInt(daysSelect.value)));
-    load(90);
+    load(30);
 });
