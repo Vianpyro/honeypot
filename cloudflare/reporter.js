@@ -197,3 +197,4 @@ function categoriesFor(servicesStr) {
             console.error('[reporter] bulk submission failed:', e.message);
         }
     }
+}
