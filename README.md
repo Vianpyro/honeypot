@@ -2,7 +2,7 @@
 
 A personal honeypot lab built to learn how the internet actually behaves — who scans it, what they look for, and how attack campaigns are structured.
 
-Currently captures ~1 000–110'000 events/day across 45+ countries with zero infrastructure cost, and automatically reports malicious IPs to AbuseIPDB.
+Currently captures ~759–107'663 events/day across 45+ countries with zero infrastructure cost, and automatically reports malicious IPs to AbuseIPDB.
 
 <a href="https://www.abuseipdb.com/user/298048" title="AbuseIPDB is an IP address blacklist for webmasters and sysadmins to report IP addresses engaging in abusive behavior on their networks">
   <img src="https://www.abuseipdb.com/contributor/298048.svg" alt="AbuseIPDB Contributor Badge" style="width: 401px;background: #35c246 linear-gradient(rgba(255,255,255,0), rgba(255,255,255,.3) 50%, rgba(0,0,0,.2) 51%, rgba(0,0,0,0)); padding: 5px;">
