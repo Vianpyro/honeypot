@@ -72,7 +72,7 @@ Cloudflare Router Worker          <- routes by hostname/ASN
 - Real-time campaign detection with adaptive Welford threshold
 - Pre-aggregated daily rollups — public stats never touch raw event data
 - Nightly AbuseIPDB reporting — automatically contributes malicious IPs
-- 366-day retention with nightly cleanup cron
+- 100-day retention with nightly cleanup cron
 - 6-hour public dashboard cache with rolling window
 
 ### Deployment

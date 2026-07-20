@@ -49,8 +49,8 @@ const IGNORE_PATHS = [
     '/abuseipdb-verification.html',
 ];
 
-// Retention: 366 days — well within D1 free tier (~730 MB/year at 1000 req/day, 5 GB limit)
-const RETENTION_DAYS = 366;
+// Retention: 100 days — well within D1 free tier (~730 MB/year at 1000 req/day, 5 GB limit)
+const RETENTION_DAYS = 100;
 // Pending rows whose 10-min bucket has long since closed are dead weight.
 // 1 bucket + 50 min buffer absorbs cron latency.
 const PENDING_STALE_HOURS = 1;
