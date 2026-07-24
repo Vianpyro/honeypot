@@ -13,6 +13,16 @@ import { reportToAbuseIPDB } from './reporter.js';
 // AbuseIPDB webmaster verification token
 const ABUSEIPDB_VERIFICATION_TOKEN = 'abuseipdb-verification-IiFYYT9g';
 
+// Hosts always sent to the honeypot, regardless of caller ASN
+const HONEYPOT_HOSTS = new Set([
+
+]);
+
+// Any other host, from a caller on one of these ASNs, also goes to the honeypot
+const DATACENTER_ASNS = new Set([
+
+]);
+
 const SIMULATORS = [
     { label: 'wordpress', pattern: /^\/{1,2}(?:[\w-]+\/)?(wp-admin|wp-login\.php|xmlrpc\.php|wp-json|wp-content|wp-includes)/ },
     { label: 'phpmyadmin', pattern: /^\/(phpmyadmin|pma|phpMyAdmin)/ },
@@ -118,10 +128,17 @@ async function cleanupOldEntries(env) {
 
 function isMonitoring(hostname, pathname, env) {
     if (hostname === 'api.pennygame.thevhome.com') return pathname === '/health';
+    if (hostname === 'vault.thevhome.com') return pathname === '/alive';
     if (hostname !== 'cloud.thevhome.com') return false;
     if (pathname === '/heartbeat') return true;
     const token = env.MONITORING_NEXTCLOUD_TOKEN;
     return Boolean(token) && pathname === `/s/${token}`;
+}
+
+function passthrough(request, env) {
+    return fetch(request, {
+        cf: { resolveOverride: new URL(env.NGINX_ORIGIN).hostname },
+    });
 }
 
 export default {
@@ -132,16 +149,20 @@ export default {
 
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
-        if (isMonitoring(url.hostname, url.pathname, env)) {
-            return fetch(request, {
-                cf: { resolveOverride: new URL(env.NGINX_ORIGIN).hostname },
-            });
-        }
 
         if (url.pathname === '/abuseipdb-verification.html') {
             return new Response(ABUSEIPDB_VERIFICATION_TOKEN, {
                 headers: { 'Content-Type': 'text/html' },
             });
+        }
+
+        if (isMonitoring(url.hostname, url.pathname, env)) {
+            return passthrough(request, env);
+        }
+
+        // Not a honeypot target and not from a datacenter ASN -> real traffic, proxy straight through
+        if (!HONEYPOT_HOSTS.has(url.hostname) && !DATACENTER_ASNS.has(request.cf?.asn)) {
+            return passthrough(request, env);
         }
 
         // ── Legacy private stats endpoint ─────────────────────────
