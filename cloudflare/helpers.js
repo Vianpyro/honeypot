@@ -1,5 +1,6 @@
 // ============================================================
 //  helpers.js — Response helper functions
+//  Public — safe to publish
 // ============================================================
 
 export function html(body, status = 200, extra = {}) {

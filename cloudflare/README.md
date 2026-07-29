@@ -23,12 +23,39 @@ cloudflare/
   stats.js        <- /hp-stats endpoint            -- public
   logger.js       <- Async D1 event logger         -- public
   schema.sql      <- D1 database schema            -- public
-  content.js      <- Fake credentials, CTF flag    -- KEEP PRIVATE
+  content.js         <- Fake credentials, CTF flag -- KEEP PRIVATE
+  config.js          <- Your hosts & endpoints     -- KEEP PRIVATE
 ```
 
-`content.js` is the only file that should not be published. It contains all
-deployment-specific content: fictional credentials, CTF flags, and any other
-values unique to your honeypot instance.
+`content.js` and `config.js` are the only files that should not be published.
+Both are gitignored and untracked, so local edits can never be staged by
+accident.
+
+`content.js` holds deployment-specific content: fictional credentials, CTF
+flags, and any other values unique to your honeypot instance.
+
+`config.js` holds everything that identifies your infrastructure — which
+hostnames are honeypots, which real endpoints your uptime monitoring polls, and
+your own ASNs. Create it from this template:
+
+```js
+export const ABUSEIPDB_VERIFICATION_TOKEN = 'abuseipdb-verification-XXXXXXXX';
+
+// Hosts always sent to the honeypot, regardless of caller ASN
+export const HONEYPOT_HOSTS = new Set([
+    'admin.example.com', 'wp.example.com', // ...
+]);
+
+// Real endpoints polled by uptime monitoring — never honeypotted.
+// Secret paths come from env so they stay out of any file.
+export function isMonitoring(hostname, pathname, env) {
+    if (hostname === 'api.example.com') return pathname === '/health';
+    return false;
+}
+
+// Your own ASNs — merged into the reporter allowlist so you never report yourself.
+export const OWN_ASNS = [];
+```
 
 ## Simulated services
 

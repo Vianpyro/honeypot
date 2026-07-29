@@ -9,19 +9,20 @@ import { statsHandler, statsApiHandler } from './stats.js';
 import { simulators } from './simulators.js';
 import { aggregateDay, yesterdayUTC } from './aggregate.js';
 import { reportToAbuseIPDB } from './reporter.js';
+import { ABUSEIPDB_VERIFICATION_TOKEN, HONEYPOT_HOSTS, isMonitoring } from './config.js';
 
-// AbuseIPDB webmaster verification token
-const ABUSEIPDB_VERIFICATION_TOKEN = 'abuseipdb-verification-IiFYYT9g';
-
-// Hosts always sent to the honeypot, regardless of caller ASN
-const HONEYPOT_HOSTS = new Set([
-
-]);
-
-// Any other host, from a caller on one of these ASNs, also goes to the honeypot
+// Any non-honeypot host, from a caller on one of these ASNs, also gets trapped
 const DATACENTER_ASNS = new Set([
-
+    14061, 16509, 14618, 396982, 24940, 20473, 13335,
+    8758, 210558, 7029, 51396, 40676, 48090,
 ]);
+
+// Self-announcing monitoring bots. They run on datacenter ASNs, so without this
+// they get honeypotted, logged, and reported to AbuseIPDB as attackers.
+// ponytail: UA match, spoofable — a spoofer just reaches nginx like any normal
+// visitor, and honeypot-only hosts are checked first. Tighten to published IP
+// ranges if that ever matters.
+const MONITOR_UA = /UptimeRobot/i;
 
 const SIMULATORS = [
     { label: 'wordpress', pattern: /^\/{1,2}(?:[\w-]+\/)?(wp-admin|wp-login\.php|xmlrpc\.php|wp-json|wp-content|wp-includes)/ },
@@ -126,15 +127,6 @@ async function cleanupOldEntries(env) {
     }
 }
 
-function isMonitoring(hostname, pathname, env) {
-    if (hostname === 'api.pennygame.thevhome.com') return pathname === '/health';
-    if (hostname === 'vault.thevhome.com') return pathname === '/alive';
-    if (hostname !== 'cloud.thevhome.com') return false;
-    if (pathname === '/heartbeat') return true;
-    const token = env.MONITORING_NEXTCLOUD_TOKEN;
-    return Boolean(token) && pathname === `/s/${token}`;
-}
-
 function passthrough(request, env) {
     return fetch(request, {
         cf: { resolveOverride: new URL(env.NGINX_ORIGIN).hostname },
@@ -160,9 +152,13 @@ export default {
             return passthrough(request, env);
         }
 
-        // Not a honeypot target and not from a datacenter ASN -> real traffic, proxy straight through
-        if (!HONEYPOT_HOSTS.has(url.hostname) && !DATACENTER_ASNS.has(request.cf?.asn)) {
-            return passthrough(request, env);
+        // Honeypot-only hosts always get trapped. On real hosts, let through both
+        // announced monitoring bots and anyone not calling from a datacenter.
+        if (!HONEYPOT_HOSTS.has(url.hostname)) {
+            const isMonitorBot = MONITOR_UA.test(request.headers.get('User-Agent') ?? '');
+            if (isMonitorBot || !DATACENTER_ASNS.has(request.cf?.asn)) {
+                return passthrough(request, env);
+            }
         }
 
         // ── Legacy private stats endpoint ─────────────────────────
@@ -270,6 +266,15 @@ export default {
 
         // ── Log to D1 asynchronously (non-blocking) ───────────────
         const isTest = await safeCompare(request.headers.get('X-Honeypot-Test'), env.ADMIN_SECRET);
+
+        const isVerifiedMonitor =
+            request.cf?.botManagement?.verifiedBot === true ||
+            MONITORING_PATHS.get(url.hostname)?.test(url.pathname);
+
+        if (!IGNORE_PATHS.includes(url.pathname) && !isTest && !isVerifiedMonitor) {
+            ctx.waitUntil(logEvent(meta, env));
+        }
+
         if (!IGNORE_PATHS.includes(url.pathname) && !isTest) {
             ctx.waitUntil(logEvent(meta, env));
         }
