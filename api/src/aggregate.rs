@@ -194,13 +194,26 @@ mod tests {
         (value * 1_000_000.0) as u32
     }
 
+    /// ONE TEST, DELIBERATELY, and not four.
+    ///
+    /// Every assertion here is about the state of a whole DAY -- stats_daily
+    /// has one row per (day, dimension, key), and `run` sweeps every day that
+    /// is owed, including days another test is mid-way through planting. Split
+    /// across four `#[tokio::test]`s they raced each other: two could pick the
+    /// same free day between the probe and the insert, and one test's `run`
+    /// aggregated another's half-planted day. They pass alone and fail
+    /// together, which is the worst way for a test to be wrong.
+    ///
+    /// They share a global resource, so they are one test that walks the
+    /// scenarios in order.
     #[tokio::test]
-    async fn a_day_is_counted_across_every_dimension() {
+    async fn the_daily_rollup() {
         let Some(db) = pool().await else { return };
+
+        // --- every dimension is counted --------------------------------
         let day = free_day(&db).await;
         plant(&db, day, 3, "CA", "wordpress").await;
         plant(&db, day, 2, "FR", "login").await;
-
         aggregate_day(&db, day).await.unwrap();
 
         assert_eq!(counts(&db, day, "volume").await, vec![(String::new(), 5)]);
@@ -218,67 +231,46 @@ mod tests {
         assert_eq!(counts(&db, day, "protocol").await, vec![("HTTP/2".to_owned(), 5)]);
 
         // The ASN dimension carries the organisation name in `extra`.
-        let (key, extra): (String, String) = sqlx::query_as(
-            "SELECT key, extra FROM stats_daily WHERE day = $1 AND dim = 'asn'",
-        )
-        .bind(day)
-        .fetch_one(&db)
-        .await
-        .unwrap();
+        let (key, extra): (String, String) =
+            sqlx::query_as("SELECT key, extra FROM stats_daily WHERE day = $1 AND dim = 'asn'")
+                .bind(day)
+                .fetch_one(&db)
+                .await
+                .unwrap();
         assert_eq!((key.as_str(), extra.as_str()), ("64500", "EXAMPLE, INC"));
-    }
 
-    /// Re-running a day replaces it. The cron could fire twice, and a rollup
-    /// that doubled its counts would be worse than one that never ran.
-    #[tokio::test]
-    async fn aggregating_the_same_day_twice_does_not_double_it() {
-        let Some(db) = pool().await else { return };
-        let day = free_day(&db).await;
-        plant(&db, day, 4, "CA", "admin").await;
-
+        // --- re-running a day replaces it ------------------------------
+        // The cron could fire twice, and a rollup that doubled its counts
+        // would be worse than one that never ran.
         aggregate_day(&db, day).await.unwrap();
-        aggregate_day(&db, day).await.unwrap();
-        assert_eq!(counts(&db, day, "volume").await, vec![(String::new(), 4)]);
-    }
+        assert_eq!(counts(&db, day, "volume").await, vec![(String::new(), 5)]);
 
-    /// The catch-up: days owed come from `job_runs`, so a gap is filled rather
-    /// than lost. The Worker's cron rolled up exactly yesterday and nothing
-    /// else, so a missed night was permanent.
-    #[tokio::test]
-    async fn days_already_done_are_not_redone_and_missing_ones_are_caught_up() {
-        let Some(db) = pool().await else { return };
-        let day = free_day(&db).await;
-        plant(&db, day, 6, "CA", "vpn").await;
-
-        // The day is owed, so a run picks it up. The COUNT returned is not
-        // asserted: the suite runs in parallel against one database, and a
-        // concurrent test's own `run` may legitimately have swept this day up
-        // first. What matters is the outcome, not who did it.
+        // --- the catch-up ----------------------------------------------
+        // Days owed come from job_runs, so a gap is filled rather than lost.
+        // The Worker's cron rolled up exactly yesterday: a missed night was
+        // permanent.
+        let missed = free_day(&db).await;
+        plant(&db, missed, 6, "CA", "vpn").await;
         run(&db, 100).await.unwrap();
-        assert_eq!(counts(&db, day, "volume").await, vec![(String::new(), 6)]);
+        assert_eq!(counts(&db, missed, "volume").await, vec![(String::new(), 6)]);
 
-        // ...and having been recorded, it is not owed again.
         let done: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM job_runs WHERE job_name = $1 AND job_key = $2",
         )
         .bind(JOB)
-        .bind(day)
+        .bind(missed)
         .fetch_one(&db)
         .await
         .unwrap();
-        assert_eq!(done, 1);
-    }
+        assert_eq!(done, 1, "the day was not recorded as done");
 
-    /// Today is still accumulating. Rolling it up and recording it as done
-    /// would freeze it half-counted, because it would never be revisited.
-    #[tokio::test]
-    async fn the_current_day_is_never_rolled_up() {
-        let Some(db) = pool().await else { return };
+        // --- today is never rolled up ----------------------------------
+        // It is still accumulating; recorded as done it would stay frozen
+        // half-counted, because nothing would revisit it.
         let today = Utc::now().date_naive();
         plant(&db, today, 2, "CA", "api").await;
-
         run(&db, 100).await.unwrap();
-        let done: i64 = sqlx::query_scalar(
+        let done_today: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM job_runs WHERE job_name = $1 AND job_key = $2",
         )
         .bind(JOB)
@@ -286,6 +278,6 @@ mod tests {
         .fetch_one(&db)
         .await
         .unwrap();
-        assert_eq!(done, 0, "today was rolled up while still in progress");
+        assert_eq!(done_today, 0, "today was rolled up while still in progress");
     }
 }
