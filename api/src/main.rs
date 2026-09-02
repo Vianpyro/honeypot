@@ -348,6 +348,33 @@ fn verify_request(auth: &AuthKeys, headers: &HeaderMap, body: &[u8]) -> Result<(
         body,
         Utc::now(),
     );
+    // THE CLIENT LEARNS LESS THAN THE OPERATOR DOES, and that asymmetry is the
+    // whole point of this block.
+    //
+    // The three 403 causes share one response body on purpose: telling a prober
+    // whether its key id exists is a free oracle. But sharing one LOG line too
+    // was simply a mistake -- the first real deployment returned 403 to every
+    // event the Worker sent, and nothing on either side could say whether the
+    // key id was wrong, the secret was wrong, or the header was malformed.
+    // Three different fixes, one indistinguishable symptom.
+    if let Err(reason) = &verdict {
+        warn!(
+            reason = match reason {
+                AuthError::Expired => "timestamp outside the +/-60s window (check both clocks)",
+                AuthError::MalformedTimestamp => "X-Honeypot-Timestamp is not RFC3339",
+                AuthError::MalformedSignature => "X-Honeypot-Signature is not unpadded base64url",
+                AuthError::UnknownKey => "no such key id in HONEYPOT_HMAC_KEYS",
+                AuthError::InvalidSignature => "signature does not verify: the secrets differ",
+            },
+            // The presented id, sanitised. It is not a secret -- we choose it --
+            // and it is the one value that separates "wrong id" from "wrong
+            // secret" at a glance. Bounded and filtered because this is
+            // attacker-controlled input reaching a log file.
+            key_id = key_id.chars().filter(char::is_ascii_alphanumeric).take(16).collect::<String>(),
+            "authentication failed"
+        );
+    }
+
     match verdict {
         Ok(()) => Ok(()),
         // 401 for "your request is not authenticated yet, fix the headers or
