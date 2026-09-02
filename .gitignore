@@ -1,2 +1,13 @@
+# Contenu privé du honeypot -- ne doit jamais être publié.
 cloudflare/content.js
 cloudflare/config.js
+
+# Secrets rendus par Ansible sur l'hôte, à côté de compose.yml.
+.env
+
+# Artefacts de build Rust.
+api/target/
+
+# Dumps PostgreSQL.
+*.sql.gz
+*.dump

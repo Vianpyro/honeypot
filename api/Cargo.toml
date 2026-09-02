@@ -1,0 +1,56 @@
+[package]
+name = "honeypot-api"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+axum = "0.8"
+base64 = "0.23.1"
+chrono = { version = "0.4", features = ["serde"] }
+hmac = "0.13.0"
+hex = "0.4"
+http = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11.0"
+# SQLx 0.9 split the single `runtime-tokio-rustls` feature of 0.7/0.8 into two
+# independent axes: one runtime (`runtime-tokio`) and one TLS backend. The old
+# combined name does not exist any more, which is the resolution error this
+# replaces.
+#
+# `tls-rustls-ring` rather than the plain `tls-rustls` alias: in 0.9 that alias
+# resolves to aws-lc-rs, whose build needs cmake and a C toolchain. The API is
+# built in a slim Rust container (see Dockerfile) where neither is installed,
+# so the alias turns a working `cargo check` on this workstation into a broken
+# image build. `ring` is what the pinned backend buys -- no C build step.
+#
+# TLS is not used on the deployed path at all (Postgres is a container on an
+# `internal: true` network), but it is compiled in so pointing DATABASE_URL at
+# a remote cluster with sslmode=require stays a variable change.
+#
+# `migrate` and NOT `macros`: the migrator embeds ./migrations at compile time
+# from the filesystem, so the build needs no database. `sqlx::query!` would --
+# it checks statements against a live server or a committed .sqlx cache -- and
+# every query here is a plain `sqlx::query`, so that dependency is not taken.
+sqlx = { version = "0.9.0", default-features = false, features = [
+    "chrono",
+    "macros",
+    "migrate",
+    "postgres",
+    "runtime-tokio",
+    "tls-rustls-ring",
+    "uuid",
+] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tower-http = { version = "0.7.1", features = ["limit", "timeout", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["serde", "v7"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+# The binary ships in a container and is never debugged from a core dump.
+strip = true
