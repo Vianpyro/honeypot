@@ -30,7 +30,11 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
+# BOTH binaries, from ONE build. `cargo build --release` produces the API and
+# the AbuseIPDB reporter together; they share the image, so the reporter is not
+# a second thing to build, tag, or keep in step with the schema it reads.
 COPY --from=build /src/target/release/honeypot-api /usr/local/bin/honeypot-api
+COPY --from=build /src/target/release/honeypot-reporter /usr/local/bin/honeypot-reporter
 
 # nobody:nogroup. The process owns nothing on disk (its state is in PostgreSQL),
 # so it needs no writable path at all -- which is what lets the compose file run

@@ -122,6 +122,64 @@ services:
           cpus: "${API_CPU_LIMIT:-1.0}"
           memory: ${API_MEM_LIMIT:-256m}
 
+  # THE ONE COMPONENT WITH A WAY OUT, and it is a separate container for exactly
+  # that reason. Reporting to AbuseIPDB is an outbound call; the API must not be
+  # able to make one (see the networks below), so the capability lives in a
+  # process that listens on nothing and is on no network a request can arrive
+  # from. It reads PostgreSQL and talks to one external host.
+  #
+  # Same image as the API -- one `cargo build` produces both binaries -- so this
+  # is a different entrypoint, not a second thing to build and keep in step.
+  #
+  # INERT WITHOUT A KEY: it aggregates, logs what it would have sent, and
+  # submits nothing until ABUSEIPDB_KEY is set. No profile needed for that.
+  reporter:
+    image: honeypot-api:local
+    # Built by the `api` service above, never fetched: this tag exists only in
+    # the host's image store.
+    pull_policy: never
+    container_name: honeypot-reporter
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/honeypot-reporter"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-honeypot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-honeypot}
+      ABUSEIPDB_KEY: ${ABUSEIPDB_KEY:-}
+      # Four calls a day. AbuseIPDB's Webmaster tier allows ten, and the same
+      # address is deduplicated for two days -- a shorter interval spends quota
+      # without reporting anyone sooner.
+      HONEYPOT_REPORT_INTERVAL_HOURS: ${HONEYPOT_REPORT_INTERVAL_HOURS:-6}
+      HONEYPOT_REPORT_WINDOW_HOURS: ${HONEYPOT_REPORT_WINDOW_HOURS:-48}
+      HONEYPOT_REPORT_MIN_EVENTS: ${HONEYPOT_REPORT_MIN_EVENTS:-5}
+      HONEYPOT_ALLOWLIST_ASNS: ${HONEYPOT_ALLOWLIST_ASNS:-}
+      # ITS OWN VARIABLE, not the API's RUST_LOG. Sharing one filter is how
+      # this process ends up silent: the deployed RUST_LOG names
+      # `honeypot_api` and `tower_http`, neither of which is this crate.
+      RUST_LOG: ${REPORTER_LOG:-honeypot_reporter=info}
+      TZ: ${TZ:-America/Montreal}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # `db` to read the events, `egress` to reach AbuseIPDB. NOT `edge`: nothing
+    # may send this process a request, which is what keeps its outbound
+    # capability from being reachable by anything the honeypot ingests.
+    networks:
+      - db
+      - egress
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # No healthcheck: this is a timer, not a server. It has nothing to answer on
+    # and a process that is running IS the health condition. Its cycles are
+    # visible in the logs -- `report cycle` every six hours.
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${REPORTER_CPU_LIMIT:-0.5}"
+          memory: ${REPORTER_MEM_LIMIT:-128m}
+
   # PREPARED, NOT DEPLOYED. Behind the `tunnel` profile, so `docker compose up`
   # starts postgres and the API and leaves this alone; it comes up only with
   # `--profile tunnel`, which the Ansible role passes when
