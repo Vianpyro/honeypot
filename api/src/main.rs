@@ -15,6 +15,7 @@
 mod auth;
 mod aggregate;
 mod campaign;
+mod stats;
 
 use std::{env, net::IpAddr, sync::Arc, time::Duration};
 
@@ -51,6 +52,14 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 struct AppState {
     db: PgPool,
     auth: Arc<AuthKeys>,
+    /// Gates the private stats scope, which returns source addresses and
+    /// captured credentials. Empty means no private scope at all -- it fails
+    /// closed, so an unconfigured deployment serves aggregates and nothing more.
+    ///
+    /// NOT the ingest signing key. That is a MAC key, and a MAC key that also
+    /// travels as a bearer password is a MAC key you have to rotate twice as
+    /// often for half the reason.
+    stats_token: Arc<String>,
 }
 
 /// `deny_unknown_fields`: a Worker that starts sending a field this schema does
@@ -122,6 +131,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hmac_keys = env::var("HONEYPOT_HMAC_KEYS").expect("HONEYPOT_HMAC_KEYS must be set");
     let auth = AuthKeys::from_env(&hmac_keys).expect("invalid HONEYPOT_HMAC_KEYS");
     let bind = env::var("HONEYPOT_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_owned());
+    let stats_token = env::var("HONEYPOT_STATS_TOKEN").unwrap_or_default();
+    if stats_token.is_empty() {
+        warn!("HONEYPOT_STATS_TOKEN is empty: the private stats scope is disabled");
+    }
     let retention_days = env_number("HONEYPOT_RETENTION_DAYS", 100);
     // A fuse, not a policy: ~150x this deployment's steady state, so it only
     // ever fires during a flood. Roughly 1 KB a row, so a million rows is about
@@ -149,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::spawn(retention_task(db.clone(), retention_days, max_events));
 
-    let app = router(AppState { db, auth: Arc::new(auth) });
+    let app = router(AppState { db, auth: Arc::new(auth), stats_token: Arc::new(stats_token) });
     let listener = TcpListener::bind(&bind).await?;
     info!(%bind, "honeypot API listening");
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
@@ -283,6 +296,13 @@ fn router(state: AppState) -> Router {
         // Compose then refuses to consider a dependency of anything.
         .route("/healthz", get(|| async { StatusCode::NO_CONTENT }))
         .route("/v1/events", post(ingest_event))
+        // READ-ONLY, AND UNSIGNED ON PURPOSE. Only the Worker's VPC binding can
+        // reach this service, so a signature would protect a path that has one
+        // caller -- at the cost of signing the request PATH, which the ingest
+        // endpoint hardcodes. Changing that is a flag day between two
+        // independently deployed components. The private scope, which returns
+        // captured credentials, is gated on its own token instead.
+        .route("/v1/stats", get(stats::handler))
         // A REQUEST THAT MATCHED NO ROUTE IS WORTH A LINE. Without this it is a
         // silent 404 from axum's own fallback -- and "the caller reached this
         // service and nothing happened" is precisely the failure that is
@@ -593,6 +613,7 @@ mod tests {
     use tower::ServiceExt;
 
     const KEY: &str = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY";
+    const TEST_STATS_TOKEN: &str = "test-stats-token";
 
     /// A fresh event id per test, per RUN.
     ///
@@ -681,7 +702,11 @@ mod tests {
 
     fn app(db: PgPool) -> Router {
         let auth = AuthKeys::from_env(&format!("active:{KEY}")).unwrap();
-        router(AppState { db, auth: Arc::new(auth) })
+        router(AppState {
+            db,
+            auth: Arc::new(auth),
+            stats_token: Arc::new(TEST_STATS_TOKEN.to_owned()),
+        })
     }
 
     async fn status(db: &PgPool, request: Request<axum::body::Body>) -> StatusCode {
