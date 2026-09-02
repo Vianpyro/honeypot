@@ -60,7 +60,23 @@ services:
   api:
     build:
       context: ./api
-    image: honeypot-api:local
+    # TAGGED BY COMMIT, not `latest` or `local`, and this is load-bearing.
+    #
+    # The image is built from the checkout, so "is it current" is a question
+    # about the checkout -- but a fixed tag makes every build LOOK present, and
+    # Compose has no way to know the code moved. That shipped a stale image: a
+    # commit added a second binary, the tag already existed, nothing rebuilt,
+    # and the new container died on `no such file or directory`. Worse, it could
+    # not recover -- the next converge saw an unchanged checkout and rebuilt
+    # nothing again.
+    #
+    # A commit-shaped tag makes the question answer itself: new commit, new tag,
+    # genuinely absent image, built. Same commit, tag present, nothing done --
+    # so the converge stays idempotent without ever forcing a rebuild.
+    #
+    # Ansible renders HONEYPOT_IMAGE_TAG from the checked-out revision. It
+    # defaults to `local` for a hand-run `docker compose` from a clone.
+    image: honeypot-api:${HONEYPOT_IMAGE_TAG:-local}
     # THIS SERVICE IS ALWAYS BUILT AND NEVER PULLED, and saying so is not
     # cosmetic. `honeypot-api:local` exists only in the host's image store, so
     # the default policy makes Compose ask Docker Hub for it first and print
@@ -134,9 +150,11 @@ services:
   # INERT WITHOUT A KEY: it aggregates, logs what it would have sent, and
   # submits nothing until ABUSEIPDB_KEY is set. No profile needed for that.
   reporter:
-    image: honeypot-api:local
-    # Built by the `api` service above, never fetched: this tag exists only in
-    # the host's image store.
+    # The SAME tag as the API above -- one build, two binaries. Compose builds
+    # it for the `api` service before starting anything, so this service never
+    # needs a build section of its own.
+    image: honeypot-api:${HONEYPOT_IMAGE_TAG:-local}
+    # Never fetched: this tag exists only in the host's image store.
     pull_policy: never
     container_name: honeypot-reporter
     restart: unless-stopped
