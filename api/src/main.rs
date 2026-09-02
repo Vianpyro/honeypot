@@ -13,6 +13,9 @@
 //! it is meant to prevent, under two concurrent retries.
 
 mod auth;
+mod aggregate;
+mod campaign;
+mod stats;
 
 use std::{env, net::IpAddr, sync::Arc, time::Duration};
 
@@ -49,6 +52,14 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 struct AppState {
     db: PgPool,
     auth: Arc<AuthKeys>,
+    /// Gates the private stats scope, which returns source addresses and
+    /// captured credentials. Empty means no private scope at all -- it fails
+    /// closed, so an unconfigured deployment serves aggregates and nothing more.
+    ///
+    /// NOT the ingest signing key. That is a MAC key, and a MAC key that also
+    /// travels as a bearer password is a MAC key you have to rotate twice as
+    /// often for half the reason.
+    stats_token: Arc<String>,
 }
 
 /// `deny_unknown_fields`: a Worker that starts sending a field this schema does
@@ -120,6 +131,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hmac_keys = env::var("HONEYPOT_HMAC_KEYS").expect("HONEYPOT_HMAC_KEYS must be set");
     let auth = AuthKeys::from_env(&hmac_keys).expect("invalid HONEYPOT_HMAC_KEYS");
     let bind = env::var("HONEYPOT_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_owned());
+    let stats_token = env::var("HONEYPOT_STATS_TOKEN").unwrap_or_default();
+    if stats_token.is_empty() {
+        warn!("HONEYPOT_STATS_TOKEN is empty: the private stats scope is disabled");
+    }
     let retention_days = env_number("HONEYPOT_RETENTION_DAYS", 100);
     // A fuse, not a policy: ~150x this deployment's steady state, so it only
     // ever fires during a flood. Roughly 1 KB a row, so a million rows is about
@@ -147,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::spawn(retention_task(db.clone(), retention_days, max_events));
 
-    let app = router(AppState { db, auth: Arc::new(auth) });
+    let app = router(AppState { db, auth: Arc::new(auth), stats_token: Arc::new(stats_token) });
     let listener = TcpListener::bind(&bind).await?;
     info!(%bind, "honeypot API listening");
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
@@ -201,6 +216,22 @@ async fn retention_task(db: PgPool, days: i64, max_events: i64) {
     let mut ticker = tokio::time::interval(Duration::from_secs(24 * 60 * 60));
     loop {
         ticker.tick().await;
+
+        // AGGREGATION FIRST, AND THE ORDER IS NOT COSMETIC. The daily rollups
+        // are derived from `events`; a day whose events the sweep below has
+        // already deleted can never be rolled up, and its history is gone for
+        // good. Any day still owed has to be counted before anything is
+        // removed.
+        match aggregate::run(&db, days).await {
+            Ok(0) => {}
+            Ok(days_rolled) => info!(days = days_rolled, "daily rollups caught up"),
+            // Not fatal, and deliberately not `continue`: a rollup that failed
+            // is a gap in the dashboard, while a retention sweep that never
+            // runs is an unbounded table. The day stays owed and is retried on
+            // the next tick -- unless the sweep removes it first, which is the
+            // trade this ordering already minimises.
+            Err(error) => error!(%error, "daily rollup failed"),
+        }
 
         let by_age = sqlx::query("DELETE FROM events WHERE observed_at < now() - make_interval(days => $1)")
             .bind(days as i32)
@@ -265,6 +296,13 @@ fn router(state: AppState) -> Router {
         // Compose then refuses to consider a dependency of anything.
         .route("/healthz", get(|| async { StatusCode::NO_CONTENT }))
         .route("/v1/events", post(ingest_event))
+        // READ-ONLY, AND UNSIGNED ON PURPOSE. Only the Worker's VPC binding can
+        // reach this service, so a signature would protect a path that has one
+        // caller -- at the cost of signing the request PATH, which the ingest
+        // endpoint hardcodes. Changing that is a flag day between two
+        // independently deployed components. The private scope, which returns
+        // captured credentials, is gated on its own token instead.
+        .route("/v1/stats", get(stats::handler))
         // A REQUEST THAT MATCHED NO ROUTE IS WORTH A LINE. Without this it is a
         // silent 404 from axum's own fallback -- and "the caller reached this
         // service and nothing happened" is precisely the failure that is
@@ -333,6 +371,15 @@ async fn ingest(
     // 0.9 only implements the INET codec behind its `ipnet`/`ipnetwork`
     // features, and serde has already parsed this into an `IpAddr`, so the cast
     // cannot fail and the crate does not have to be pulled in for one column.
+    // Kept before the payload is consumed by the binds below: campaign detection
+    // needs them after the insert, and `bind` takes ownership.
+    let (ua, asn, observed_at) = (payload.ua.clone(), payload.asn, payload.observed_at);
+
+    let mut tx = state.db.begin().await.map_err(|error| {
+        error!(%error, "could not open a transaction");
+        ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage unavailable")
+    })?;
+
     let inserted = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO events (
@@ -365,12 +412,33 @@ async fn ingest(
     .bind(payload.body)
     .bind(payload.username)
     .bind(payload.password)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|error| {
         // The event id is safe to log (it is a UUID the Worker minted); the
         // payload is not, and is not logged anywhere.
         error!(%error, event_id = %payload.event_id, "event insert failed");
+        ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage unavailable")
+    })?;
+
+    // CAMPAIGN DETECTION SHARES THE INSERT'S TRANSACTION. A crash between the
+    // two would otherwise leave an event that belongs to a campaign nothing
+    // points at, or a promoted campaign whose pending row still exists -- both
+    // of which the D1 version could produce, and its own comment admitted.
+    //
+    // Only for a row that was actually written: a duplicate has already been
+    // counted, and running detection again would inflate the burst.
+    if let Some(event_id) = inserted {
+        campaign::detect(&mut tx, event_id, ua.as_deref(), asn, observed_at)
+            .await
+            .map_err(|error| {
+                error!(%error, event_id = %payload.event_id, "campaign detection failed");
+                ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage unavailable")
+            })?;
+    }
+
+    tx.commit().await.map_err(|error| {
+        error!(%error, event_id = %payload.event_id, "commit failed");
         ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage unavailable")
     })?;
 
@@ -545,6 +613,7 @@ mod tests {
     use tower::ServiceExt;
 
     const KEY: &str = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY";
+    const TEST_STATS_TOKEN: &str = "test-stats-token";
 
     /// A fresh event id per test, per RUN.
     ///
@@ -633,7 +702,11 @@ mod tests {
 
     fn app(db: PgPool) -> Router {
         let auth = AuthKeys::from_env(&format!("active:{KEY}")).unwrap();
-        router(AppState { db, auth: Arc::new(auth) })
+        router(AppState {
+            db,
+            auth: Arc::new(auth),
+            stats_token: Arc::new(TEST_STATS_TOKEN.to_owned()),
+        })
     }
 
     async fn status(db: &PgPool, request: Request<axum::body::Body>) -> StatusCode {
