@@ -145,19 +145,53 @@ async fn run_once(
     let already = fetch_recently_submitted(db).await?;
     let extra_allowlist = allowlist_from_env();
 
-    let selected: Vec<&Candidate> = candidates
-        .iter()
-        .filter(|c| !already.contains(&c.ip))
-        .filter(|c| !is_allowlisted(c, &extra_allowlist))
-        .take(MAX_ROWS_PER_REPORT)
-        .collect();
+    // EVERY CANDIDATE IS ACCOUNTED FOR, and the counters exist because the
+    // first real cycle reported "candidates 17, already_reported 4, selected 0"
+    // -- leaving thirteen addresses that vanished with no explanation anywhere.
+    // A dry run whose whole purpose is showing what would be sent has to say
+    // where the rest went.
+    //
+    // `already_reported` counts the RECENT SUBMISSIONS TABLE, not this batch,
+    // so it does not add up with the rest either. The three below do:
+    // candidates = skipped_recent + allowlisted + selected.
+    let mut skipped_recent = 0usize;
+    let mut allowlisted = 0usize;
+    let mut selected: Vec<&Candidate> = Vec::new();
+    for candidate in &candidates {
+        if already.contains(&candidate.ip) {
+            skipped_recent += 1;
+        } else if is_allowlisted(candidate, &extra_allowlist) {
+            allowlisted += 1;
+        } else if selected.len() < MAX_ROWS_PER_REPORT {
+            selected.push(candidate);
+        }
+    }
 
     info!(
         candidates = candidates.len(),
-        already_reported = already.len(),
+        skipped_recent,
+        allowlisted,
         selected = selected.len(),
+        already_reported = already.len(),
         "report cycle"
     );
+
+    // Which addresses were spared, and why, at DEBUG. Not at INFO: this is one
+    // line per allowlisted attacker every six hours, and the counter above is
+    // what a healthy run needs. Turn it on to answer "why was THAT one not
+    // reported" -- REPORTER_LOG=honeypot_reporter=debug.
+    if allowlisted > 0 {
+        for candidate in candidates.iter().filter(|c| !already.contains(&c.ip)) {
+            if is_allowlisted(candidate, &extra_allowlist) {
+                tracing::debug!(
+                    ip = candidate.ip,
+                    asn = candidate.asn,
+                    ua = candidate.ua.as_deref().unwrap_or(""),
+                    "allowlisted, not reported"
+                );
+            }
+        }
+    }
 
     if selected.is_empty() {
         return Ok(());
