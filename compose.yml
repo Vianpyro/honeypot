@@ -61,6 +61,20 @@ services:
     build:
       context: ./api
     image: honeypot-api:local
+    # THIS SERVICE IS ALWAYS BUILT AND NEVER PULLED, and saying so is not
+    # cosmetic. `honeypot-api:local` exists only in the host's image store, so
+    # the default policy makes Compose ask Docker Hub for it first and print
+    #     pull access denied for honeypot-api, repository does not exist
+    #     or may require 'docker login'
+    # on every first build. It is harmless -- the build runs straight after --
+    # but an "unauthorized" line in the deploy of a honeypot is exactly the
+    # false alarm that sends someone hunting for a missing credential.
+    #
+    # NOT `build`, which was tried first: it forces a build on every `up`, and
+    # BuildKit stamps a fresh attestation each time, so the image id changes,
+    # the container is Recreated and the API restarts on every converge.
+    # `never` builds only what is missing and leaves a converged host alone.
+    pull_policy: never
     container_name: honeypot-api
     restart: unless-stopped
     environment:
