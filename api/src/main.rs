@@ -121,6 +121,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth = AuthKeys::from_env(&hmac_keys).expect("invalid HONEYPOT_HMAC_KEYS");
     let bind = env::var("HONEYPOT_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_owned());
     let retention_days = env_number("HONEYPOT_RETENTION_DAYS", 100);
+    // A fuse, not a policy: ~150x this deployment's steady state, so it only
+    // ever fires during a flood. Roughly 1 KB a row, so a million rows is about
+    // a gigabyte. 0 disables it.
+    let max_events = env_number("HONEYPOT_MAX_EVENTS", 1_000_000);
 
     // `max_connections` stays well under the container's `max_connections=100`:
     // several API replicas plus a psql session for a restore must all still fit.
@@ -141,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sqlx::migrate!("./migrations").run(&db).await?;
     info!("migrations applied");
 
-    tokio::spawn(retention_task(db.clone(), retention_days));
+    tokio::spawn(retention_task(db.clone(), retention_days, max_events));
 
     let app = router(AppState { db, auth: Arc::new(auth) });
     let listener = TcpListener::bind(&bind).await?;
@@ -189,7 +193,7 @@ async fn shutdown_signal() {
 ///
 /// `campaign_events` and `pending_campaign_events` cascade on the deleted rows,
 /// so the campaign bookkeeping never outlives the events it points at.
-async fn retention_task(db: PgPool, days: i64) {
+async fn retention_task(db: PgPool, days: i64, max_events: i64) {
     if days <= 0 {
         warn!("retention disabled (HONEYPOT_RETENTION_DAYS <= 0)");
         return;
@@ -197,13 +201,58 @@ async fn retention_task(db: PgPool, days: i64) {
     let mut ticker = tokio::time::interval(Duration::from_secs(24 * 60 * 60));
     loop {
         ticker.tick().await;
-        let deleted = sqlx::query("DELETE FROM events WHERE observed_at < now() - make_interval(days => $1)")
+
+        let by_age = sqlx::query("DELETE FROM events WHERE observed_at < now() - make_interval(days => $1)")
             .bind(days as i32)
             .execute(&db)
             .await;
-        match deleted {
+        match by_age {
             Ok(result) => info!(rows = result.rows_affected(), days, "retention sweep"),
             Err(error) => error!(%error, "retention sweep failed"),
+        }
+
+        // A CEILING ON TOP OF THE WINDOW, because age alone bounds TIME and not
+        // SIZE. At this deployment's usual rate a hundred days is a few
+        // thousand rows and a handful of megabytes -- but a honeypot's input
+        // rate is chosen by its attackers, and one botnet turning its attention
+        // here could write a hundred thousand rows a day. Age-based retention
+        // would dutifully keep every one of them for a hundred days, on a
+        // machine that also serves this network's DNS, DHCP and password vault.
+        //
+        // The cap is deliberately far above normal operation, so it never
+        // silently truncates a working system: it is a fuse, not a policy.
+        //
+        // Bounds GROWTH, and does not return disk to the operating system --
+        // PostgreSQL reuses the freed pages, so the table plateaus rather than
+        // shrinking. That is the correct behaviour for a steady state; after a
+        // one-off flood, `VACUUM FULL events` is the deliberate, locking
+        // operation that gives the space back.
+        if max_events > 0 {
+            // The threshold id is found first, so the DELETE is a range scan on
+            // the primary key rather than a sort of the whole table. A database
+            // holding fewer than `max_events` rows yields NULL here, and
+            // `id < NULL` matches nothing -- which is the no-op we want.
+            //
+            // `OFFSET $1 - 1`, not `OFFSET $1`: the latter returns the (N+1)th
+            // newest row, so the sweep would leave N+1 behind. Irrelevant at a
+            // million, but a comment claiming it keeps `max_events` should be
+            // true.
+            let by_count = sqlx::query(
+                "DELETE FROM events
+                 WHERE id < (SELECT id FROM events ORDER BY id DESC OFFSET $1 - 1 LIMIT 1)",
+            )
+            .bind(max_events)
+            .execute(&db)
+            .await;
+            match by_count {
+                Ok(result) if result.rows_affected() > 0 => warn!(
+                    rows = result.rows_affected(),
+                    max_events,
+                    "row ceiling reached: deleted the oldest events BEFORE their retention window expired"
+                ),
+                Ok(_) => {}
+                Err(error) => error!(%error, "row ceiling sweep failed"),
+            }
         }
     }
 }
@@ -889,6 +938,64 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(links, 0, "campaign_events did not cascade");
+    });
+
+    // The row ceiling's arithmetic: nothing below the cap, exactly the newest
+    // N above it, and no error on an empty set.
+    //
+    // SCOPED BY `service`, and that is not incidental. The production
+    // statement has no WHERE clause beyond the threshold, so running it
+    // verbatim here would delete whatever the other tests are mid-way through
+    // on this shared database -- the first version of this test did exactly
+    // that, and took two reporter tests down with it. The OFFSET arithmetic
+    // being checked is identical, and that is the part that was wrong.
+    db_test!(the_row_ceiling_keeps_exactly_the_newest_rows, db, {
+        let marker = fresh();
+        sqlx::query(
+            "INSERT INTO events (ingest_id, observed_at, ip, method, path, service)
+             SELECT gen_random_uuid(), now(), '203.0.113.7'::inet, 'GET', '/', $1
+             FROM generate_series(1, 10)",
+        )
+        .bind(&marker)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        async fn sweep(db: &PgPool, keep: i64, marker: &str) -> u64 {
+            sqlx::query(
+                "DELETE FROM events
+                 WHERE service = $2
+                   AND id < (SELECT id FROM events WHERE service = $2
+                             ORDER BY id DESC OFFSET $1 - 1 LIMIT 1)",
+            )
+            .bind(keep)
+            .bind(marker)
+            .execute(db)
+            .await
+            .unwrap()
+            .rows_affected()
+        }
+
+        async fn left(db: &PgPool, marker: &str) -> i64 {
+            sqlx::query_scalar("SELECT count(*) FROM events WHERE service = $1")
+                .bind(marker)
+                .fetch_one(db)
+                .await
+                .unwrap()
+        }
+
+        // A cap above the volume must not touch a single row.
+        assert_eq!(sweep(&db, 500, &marker).await, 0);
+        assert_eq!(left(&db, &marker).await, 10);
+
+        // Below it, exactly four survive -- not five, which is what the first
+        // version of this statement left behind.
+        assert_eq!(sweep(&db, 4, &marker).await, 6);
+        assert_eq!(left(&db, &marker).await, 4);
+
+        // An empty set is a no-op, not an error: `id < NULL` matches nothing.
+        sqlx::query("DELETE FROM events WHERE service = $1").bind(&marker).execute(&db).await.unwrap();
+        assert_eq!(sweep(&db, 4, &marker).await, 0);
     });
 
     // The 100-day sweep, against rows this test plants itself: one old enough
