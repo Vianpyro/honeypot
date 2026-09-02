@@ -39,6 +39,16 @@ export const LIMITS = {
 
 const encoder = new TextEncoder();
 
+// Module scope, so it survives every request an isolate serves and resets when
+// the isolate is recycled. See the one place it is read, in sendEvent.
+let warnedDisabled = false;
+
+// Test seam. Exported rather than reached into, so the tests do not depend on
+// module internals staying where they are.
+export function resetDisabledWarning() {
+    warnedDisabled = false;
+}
+
 export function base64urlEncode(bytes) {
     let binary = '';
     for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -154,7 +164,26 @@ export function buildPayload(meta, eventId) {
 export async function sendEvent(meta, env, eventId = crypto.randomUUID()) {
     const binding = env.HONEYPOT_API;
     const secret = env.HONEYPOT_HMAC_KEY;
-    if (!binding || !secret) return 'disabled';
+    if (!binding || !secret) {
+        // ONCE PER ISOLATE, and this line exists because its absence was
+        // actively misleading. Success is silent here by design -- the proof
+        // that delivery works is rows arriving in PostgreSQL, not a log line
+        // per event -- so an unconfigured Worker and a working one both produce
+        // no output whatsoever. That is the one state worth saying out loud.
+        //
+        // Not per event: at this Worker's volume that would be thousands of
+        // identical lines a day for a condition that cannot change without a
+        // redeploy.
+        if (!warnedDisabled) {
+            warnedDisabled = true;
+            console.warn(
+                '[honeypot] PostgreSQL delivery is OFF:'
+                + ` binding ${binding ? 'present' : 'MISSING'},`
+                + ` secret ${secret ? 'present' : 'MISSING'}`,
+            );
+        }
+        return 'disabled';
+    }
 
     try {
         const payload = buildPayload(meta, eventId);

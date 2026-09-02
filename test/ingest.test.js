@@ -9,6 +9,7 @@ import {
     buildPayload,
     canonicalRequest,
     clamp,
+    resetDisabledWarning,
     sendEvent,
     signRequest,
 } from '../cloudflare/ingest.js';
@@ -127,9 +128,28 @@ test('the payload survives JSON round-tripping with hostile input', () => {
 });
 
 test('delivery is inert until the binding and the secret both exist', async () => {
+    resetDisabledWarning();
     assert.equal(await sendEvent(meta, {}), 'disabled');
     assert.equal(await sendEvent(meta, { HONEYPOT_API: { fetch: () => {} } }), 'disabled');
     assert.equal(await sendEvent(meta, { HONEYPOT_HMAC_KEY: KEY }), 'disabled');
+});
+
+// Success is silent, so "no output" must not be able to mean two things.
+test('being switched off says so exactly once per isolate', async () => {
+    resetDisabledWarning();
+    const said = [];
+    const warn = console.warn;
+    console.warn = (line) => said.push(line);
+    try {
+        await sendEvent(meta, {});
+        await sendEvent(meta, {});
+        await sendEvent(meta, { HONEYPOT_HMAC_KEY: KEY });
+    } finally {
+        console.warn = warn;
+    }
+    assert.equal(said.length, 1, 'the warning repeated, or never fired');
+    assert.match(said[0], /delivery is OFF/);
+    assert.match(said[0], /binding MISSING/);
 });
 
 test('a configured delivery signs the exact bytes it sends', async () => {
