@@ -216,6 +216,20 @@ fn router(state: AppState) -> Router {
         // Compose then refuses to consider a dependency of anything.
         .route("/healthz", get(|| async { StatusCode::NO_CONTENT }))
         .route("/v1/events", post(ingest_event))
+        // A REQUEST THAT MATCHED NO ROUTE IS WORTH A LINE. Without this it is a
+        // silent 404 from axum's own fallback -- and "the caller reached this
+        // service and nothing happened" is precisely the failure that is
+        // impossible to diagnose from the outside. It catches a proxy or a
+        // tunnel that rewrites or drops the path, which is a real possibility
+        // for a binding whose routing this service does not control.
+        //
+        // Method and path only, both bounded by hyper's own header limits, and
+        // no body: this endpoint is reachable by anything that gets onto the
+        // tunnel, so it must not become a way to write arbitrary text into logs.
+        .fallback(|method: Method, uri: axum::http::Uri| async move {
+            warn!(%method, path = uri.path(), "request to an unknown route");
+            (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "unknown route" })))
+        })
         .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BYTES))
         // 503, not the layer's default 408: a deadline blown here means this
         // service could not serve in time, and a Worker retry is the correct
@@ -225,7 +239,31 @@ fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Logs every rejection, then returns it unchanged.
+///
+/// THIS EXISTS BECAUSE ITS ABSENCE COST A DAY. The tunnel's own metrics count a
+/// connection that was established, not a request that succeeded -- so a Worker
+/// whose events were all being refused showed up as "1k connections, 0 errors"
+/// on the Cloudflare side and an empty table here, with nothing anywhere saying
+/// why. An ingest service that silently drops authenticated-looking traffic is
+/// not observable at all.
+///
+/// The status and the fixed reason string only. Both are chosen by this file;
+/// nothing derived from the request, the payload or the key material is logged,
+/// because the payloads here are captured credentials.
 async fn ingest_event(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<(StatusCode, Json<EventResponse>), ApiError> {
+    let outcome = ingest(State(state), headers, body).await;
+    if let Err(error) = &outcome {
+        warn!(status = error.status.as_u16(), reason = error.message, "event rejected");
+    }
+    outcome
+}
+
+async fn ingest(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
