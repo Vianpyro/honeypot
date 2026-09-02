@@ -1,0 +1,176 @@
+# HoneyLab: PostgreSQL + the ingest API + the Cloudflare tunnel client.
+#
+# THIS FILE IS THE ONE DEFINITION OF THE STACK. The Ansible role
+# (VHome: roles/honeypot) clones this repository onto the host and runs THIS
+# file; it renders only the `.env` beside it. A second, Jinja copy of the same
+# services in the role would be two things to keep in agreement, and the one
+# that drifts is always the one you are not looking at.
+#
+# NOTHING IS PUBLISHED ON THE HOST. Not PostgreSQL, not the API, not
+# cloudflared -- there is no `ports:` key anywhere below and there must never
+# be one. The only way in is the tunnel, and the only way to reach the database
+# is `docker compose exec`.
+#
+# NO SECRET IS IN THIS FILE. Everything sensitive arrives through `.env`, which
+# is 0600, git-ignored, and rendered by Ansible from the vault. See .env.example.
+
+name: honeypot
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:18}
+    container_name: honeypot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-honeypot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-honeypot}
+      # Deterministic collation, set at initdb time. A cluster restored into a
+      # different libc collation has silently wrong index ordering on TEXT.
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8"
+    volumes:
+      # Postgres 18 keeps PGDATA under the versioned path; naming it explicitly
+      # is what stops a future image bump from initialising an empty cluster
+      # beside the real one. Same shape as the collabst stack on this host.
+      - postgres_data:/var/lib/postgresql/18/docker
+    # `db` ONLY, and `db` is `internal: true`. This container has no route to
+    # the internet and no route from it -- not even out. The pg_dump for the
+    # backups runs through `docker exec`, which needs no network at all.
+    networks:
+      - db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-honeypot} -d ${POSTGRES_DB:-honeypot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    logging: &logging
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "${POSTGRES_CPU_LIMIT:-1.0}"
+          memory: ${POSTGRES_MEM_LIMIT:-512m}
+
+  api:
+    build:
+      context: ./api
+    image: honeypot-api:local
+    container_name: honeypot-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-honeypot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-honeypot}
+      # key-id:base64url-secret pairs, comma-separated. Rotation is a second
+      # pair here plus a Worker that starts sending the new X-Honeypot-Key-Id.
+      HONEYPOT_HMAC_KEYS: ${HONEYPOT_HMAC_KEYS:?HONEYPOT_HMAC_KEYS must be set in .env}
+      HONEYPOT_RETENTION_DAYS: ${HONEYPOT_RETENTION_DAYS:-100}
+      HONEYPOT_DB_MAX_CONNECTIONS: ${HONEYPOT_DB_MAX_CONNECTIONS:-16}
+      RUST_LOG: ${RUST_LOG:-honeypot_api=info,tower_http=warn}
+      TZ: ${TZ:-America/Montreal}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # BOTH networks, and both are internal. `db` is the only route to Postgres;
+    # `edge` is the only route from cloudflared. The API therefore has no
+    # outbound internet access whatsoever -- which is the cheap structural
+    # answer to SSRF and to exfiltration from a compromised ingest path, since
+    # this service legitimately needs to reach nothing at all.
+    networks:
+      - db
+      - edge
+    expose:
+      - "8080"
+    # The process writes nothing to disk. A read-only root filesystem is
+    # therefore free, and removes the "drop a binary and exec it" step from
+    # anything that gets code execution here.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # NO /var/run/docker.sock, ever. The socket is root-equivalent on a host
+    # that also serves this network's DNS, DHCP and password vault.
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${API_CPU_LIMIT:-1.0}"
+          memory: ${API_MEM_LIMIT:-256m}
+
+  # PREPARED, NOT DEPLOYED. Behind the `tunnel` profile, so `docker compose up`
+  # starts postgres and the API and leaves this alone; it comes up only with
+  # `--profile tunnel`, which the Ansible role passes when
+  # honeypot_cloudflared_enabled is true and a token exists.
+  #
+  # Without the profile a tokenless container would crash-loop on every host
+  # that has not been given a tunnel yet, which is a red stack reporting a
+  # decision nobody has made.
+  cloudflared:
+    profiles: ["tunnel"]
+    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2026.8.1}
+    container_name: honeypot-cloudflared
+    restart: unless-stopped
+    # A REMOTELY-MANAGED tunnel: the token is the entire configuration, and it
+    # is a secret, so it lives in .env and nothing about the tunnel (its id, its
+    # credentials, its hostname) is committed here.
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      # PLAIN `${...}`, not the `:?` required-variable form used above. Compose
+      # interpolates the WHOLE file before it applies profiles, so a `:?` here
+      # makes every `docker compose` command fail on a host that has no tunnel
+      # yet -- including the ones that only start postgres and the API.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+      TUNNEL_METRICS: "127.0.0.1:2000"
+    # `edge` reaches the API; `egress` is the only non-internal network in this
+    # file and exists solely so this container can dial Cloudflare. It is NOT on
+    # `db`: a compromised tunnel client cannot open a connection to PostgreSQL.
+    #
+    # The tunnel is OUTBOUND ONLY. No inbound port is published, opened or
+    # forwarded -- that is the whole reason for this shape rather than a port on
+    # the router.
+    networks:
+      - edge
+      - egress
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    user: "65532:65532"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "cloudflared", "--version"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${CLOUDFLARED_CPU_LIMIT:-0.5}"
+          memory: ${CLOUDFLARED_MEM_LIMIT:-128m}
+
+networks:
+  # `internal: true` on both: no gateway, no NAT, no route off the host. The
+  # only container with a way out is cloudflared, through `egress` below.
+  db:
+    internal: true
+  edge:
+    internal: true
+  egress:
+
+volumes:
+  postgres_data:
