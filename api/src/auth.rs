@@ -170,6 +170,29 @@ mod tests {
         assert_eq!(verify_at(&sign(TS, BODY), TS), Ok(()));
     }
 
+    /// THE CROSS-LANGUAGE CONTRACT, and the reason this constant is written out
+    /// rather than computed on both sides.
+    ///
+    /// The signer lives in the Worker (cloudflare/ingest.js) and the verifier
+    /// lives here. Two implementations of one canonical string drift silently:
+    /// a change to the separator, the hash encoding or the timestamp handling
+    /// leaves both suites green and produces a 403 in production, on the path
+    /// that carries the events.
+    ///
+    /// test/ingest.test.js asserts this exact string for the same key, body and
+    /// timestamp. Changing the canonical format now turns BOTH suites red,
+    /// which is the only place that failure is cheap.
+    #[test]
+    fn matches_the_worker_reference_vector() {
+        const REFERENCE: &str = "3T6XgvahXPscTT2Qo0cCwRE2Deo1DDdZwm-U0_r1GUE";
+        assert_eq!(sign_with(KEY, TS, BODY), REFERENCE, "the Rust signer moved away from the vector");
+        assert_eq!(
+            keys().verify("active", TS, REFERENCE, "POST", "/v1/events", BODY, at(TS)),
+            Ok(()),
+            "the Rust verifier rejects a signature the Worker would send"
+        );
+    }
+
     #[test]
     fn accepts_every_configured_key_id() {
         let sig = sign_with(OTHER_KEY, TS, BODY);

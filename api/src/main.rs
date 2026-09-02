@@ -586,8 +586,8 @@ mod tests {
         assert_eq!(rows(&db, &id).await, 0);
     });
 
-    /// The signed bytes and the sent bytes differ by one captured credential --
-    /// which is exactly the edit anyone on the path would want to make.
+    // The signed bytes and the sent bytes differ by one captured credential --
+    // which is exactly the edit anyone on the path would want to make.
     db_test!(rejects_a_body_modified_after_signing, db, {
         let id = fresh();
         let signed_body = serde_json::to_vec(&payload(&id)).unwrap();
@@ -798,8 +798,8 @@ mod tests {
         assert_eq!(links, 0, "campaign_events did not cascade");
     });
 
-    /// The 100-day sweep, against rows this test plants itself: one old enough
-    /// to go and one that must stay.
+    // The 100-day sweep, against rows this test plants itself: one old enough
+    // to go and one that must stay.
     db_test!(retention_deletes_only_rows_past_the_window, db, {
         let (old, recent) = (fresh(), fresh());
         for (id, age_days) in [(&old, 200), (&recent, 10)] {
