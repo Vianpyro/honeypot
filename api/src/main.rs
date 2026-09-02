@@ -13,6 +13,7 @@
 //! it is meant to prevent, under two concurrent retries.
 
 mod auth;
+mod aggregate;
 mod campaign;
 
 use std::{env, net::IpAddr, sync::Arc, time::Duration};
@@ -202,6 +203,22 @@ async fn retention_task(db: PgPool, days: i64, max_events: i64) {
     let mut ticker = tokio::time::interval(Duration::from_secs(24 * 60 * 60));
     loop {
         ticker.tick().await;
+
+        // AGGREGATION FIRST, AND THE ORDER IS NOT COSMETIC. The daily rollups
+        // are derived from `events`; a day whose events the sweep below has
+        // already deleted can never be rolled up, and its history is gone for
+        // good. Any day still owed has to be counted before anything is
+        // removed.
+        match aggregate::run(&db, days).await {
+            Ok(0) => {}
+            Ok(days_rolled) => info!(days = days_rolled, "daily rollups caught up"),
+            // Not fatal, and deliberately not `continue`: a rollup that failed
+            // is a gap in the dashboard, while a retention sweep that never
+            // runs is an unbounded table. The day stays owed and is retried on
+            // the next tick -- unless the sweep removes it first, which is the
+            // trade this ordering already minimises.
+            Err(error) => error!(%error, "daily rollup failed"),
+        }
 
         let by_age = sqlx::query("DELETE FROM events WHERE observed_at < now() - make_interval(days => $1)")
             .bind(days as i32)
