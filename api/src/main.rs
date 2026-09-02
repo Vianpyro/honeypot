@@ -364,7 +364,7 @@ fn verify_request(auth: &AuthKeys, headers: &HeaderMap, body: &[u8]) -> Result<(
                 AuthError::MalformedTimestamp => "X-Honeypot-Timestamp is not RFC3339",
                 AuthError::MalformedSignature => "X-Honeypot-Signature is not unpadded base64url",
                 AuthError::UnknownKey => "no such key id in HONEYPOT_HMAC_KEYS",
-                AuthError::InvalidSignature => "signature does not verify: the secrets differ",
+                AuthError::InvalidSignature => "signature does not verify",
             },
             // The presented id, sanitised. It is not a secret -- we choose it --
             // and it is the one value that separates "wrong id" from "wrong
@@ -373,6 +373,34 @@ fn verify_request(auth: &AuthKeys, headers: &HeaderMap, body: &[u8]) -> Result<(
             key_id = key_id.chars().filter(char::is_ascii_alphanumeric).take(16).collect::<String>(),
             "authentication failed"
         );
+        // Once the key id is known good, a failing signature has exactly two
+        // causes and they need opposite fixes: the secrets differ, or something
+        // between the sender and here changed the bytes. The sender states the
+        // digest it signed over; this compares it with the digest of what
+        // actually arrived and says which.
+        //
+        // PURELY DIAGNOSTIC. Nothing above or below trusts this header -- it is
+        // read only after the real verification has already failed, and it can
+        // never turn a rejection into an acceptance.
+        if matches!(reason, AuthError::InvalidSignature) {
+            let received = auth::body_hash_hex(body);
+            match header(headers, "X-Honeypot-Body-Sha256") {
+                Ok(claimed) if claimed.eq_ignore_ascii_case(&received) => warn!(
+                    body_len = body.len(),
+                    "the body arrived intact, so the two HMAC secrets differ"
+                ),
+                Ok(_) => warn!(
+                    body_len = body.len(),
+                    body_sha256 = received,
+                    "the body CHANGED in transit: the sender signed different bytes"
+                ),
+                Err(_) => warn!(
+                    body_len = body.len(),
+                    body_sha256 = received,
+                    "no X-Honeypot-Body-Sha256 to compare against (older client)"
+                ),
+            }
+        }
     }
 
     match verdict {

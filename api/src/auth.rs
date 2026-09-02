@@ -129,8 +129,18 @@ impl AuthKeys {
 }
 
 pub fn canonical_request(method: &str, path: &str, timestamp: &str, body: &[u8]) -> String {
-    let body_hash = hex::encode(Sha256::digest(body));
+    let body_hash = body_hash_hex(body);
     format!("{method}\n{path}\n{timestamp}\n{body_hash}")
+}
+
+/// The body digest the canonical string embeds, on its own.
+///
+/// Exposed because the ingest handler compares it with the digest the SENDER
+/// claims to have signed over, to tell "the secrets differ" apart from "the
+/// bytes changed in transit". One definition, so that comparison can never be
+/// made against a differently-computed hash.
+pub fn body_hash_hex(body: &[u8]) -> String {
+    hex::encode(Sha256::digest(body))
 }
 
 #[cfg(test)]

@@ -97,6 +97,21 @@ export function canonicalRequest(method, path, timestamp, bodyHashHex) {
     return `${method}\n${path}\n${timestamp}\n${bodyHashHex}`;
 }
 
+// The body hash the signature covers, as its own value.
+//
+// Sent alongside the request in X-Honeypot-Body-Sha256, which is DIAGNOSTIC AND
+// NOT AUTHENTICATION -- the server must never trust it, and does not. It exists
+// because "the signature does not verify" has exactly two causes once the key id
+// is known good, and they need opposite fixes: either the secrets differ, or
+// something between here and the server changed the bytes. Comparing the hash
+// the sender computed with the hash the receiver computes says which, in one
+// line, instead of a day of elimination.
+//
+// It leaks nothing: it is a digest of a body the recipient already has.
+export async function bodyHashHex(bodyBytes) {
+    return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', bodyBytes)));
+}
+
 export async function signRequest(secretBase64url, method, path, timestamp, bodyBytes) {
     const digest = await crypto.subtle.digest('SHA-256', bodyBytes);
     const canonical = canonicalRequest(method, path, timestamp, hex(new Uint8Array(digest)));
@@ -205,6 +220,10 @@ export async function sendEvent(meta, env, eventId = crypto.randomUUID()) {
                 'X-Honeypot-Key-Id': env.HONEYPOT_KEY_ID ?? 'v1',
                 'X-Honeypot-Timestamp': timestamp,
                 'X-Honeypot-Signature': signature,
+                // Diagnostic only -- see bodyHashHex. The server compares it
+                // with its own digest when a signature fails, and ignores it
+                // entirely otherwise.
+                'X-Honeypot-Body-Sha256': await bodyHashHex(bodyBytes),
             },
             body: bodyBytes,
         });
