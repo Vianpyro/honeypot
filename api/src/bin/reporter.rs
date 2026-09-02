@@ -577,10 +577,20 @@ mod tests {
         Some(db)
     }
 
-    /// Plants events for one address. Returns the address, unique per test so
-    /// the suite stays parallel-safe against one shared database.
-    async fn plant(db: &PgPool, octet: i32, count: i32, service: &str, path: &str) -> String {
-        let ip = format!("198.51.100.{octet}");
+    /// Plants events for one address and returns it.
+    ///
+    /// THE ADDRESS IS RANDOM, not derived from the caller's index. Fixed
+    /// addresses made the suite pass once and fail on the second `cargo test`
+    /// against the same database: the previous run's events were still inside
+    /// the 48-hour window, so a test expecting six found twelve. 198.18.0.0/15
+    /// is the benchmarking range -- 128k addresses, and never real traffic.
+    async fn plant(db: &PgPool, _octet: i32, count: i32, service: &str, path: &str) -> String {
+        let ip: String = sqlx::query_scalar(
+            "SELECT '198.18.' || (random() * 255)::int || '.' || (random() * 255)::int",
+        )
+        .fetch_one(db)
+        .await
+        .unwrap();
         for index in 0..count {
             sqlx::query(
                 "INSERT INTO events (ingest_id, observed_at, ip, asn, as_organization,
@@ -664,7 +674,12 @@ mod tests {
     #[tokio::test]
     async fn events_outside_the_window_are_ignored() {
         let Some(db) = pool().await else { return };
-        let ip = format!("198.51.100.16");
+        let ip: String = sqlx::query_scalar(
+            "SELECT '198.18.' || (random() * 255)::int || '.' || (random() * 255)::int",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
         for _ in 0..6 {
             sqlx::query(
                 "INSERT INTO events (ingest_id, observed_at, ip, method, path, service)
