@@ -23,23 +23,24 @@ CREATE TABLE IF NOT EXISTS events (
   received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   ip INET NOT NULL,
   country CHAR(2),
-  asn BIGINT CHECK (asn >= 0),
-  as_organization TEXT,
-  ua TEXT,
+  -- 32-bit AS numbers; negative is impossible in the wire format.
+  asn BIGINT CHECK (asn BETWEEN 0 AND 4294967295),
+  as_organization TEXT CHECK (char_length(as_organization) <= 512),
+  ua TEXT CHECK (char_length(ua) <= 2048),
   -- Bounded as well as shaped.  The API validates the same limits and turns a
   -- violation into a 422, but every field in this table is attacker-supplied
   -- by design, so the constraint has to hold for ANY writer -- a restore, a
   -- backfill from D1, a psql session.
   method TEXT NOT NULL CHECK (method ~ '^[A-Z]{1,16}$'),
   path TEXT NOT NULL CHECK (left(path, 1) = '/' AND char_length(path) <= 2048),
-  query TEXT,
+  query TEXT CHECK (char_length(query) <= 2048),
   body TEXT CHECK (char_length(body) <= 2000),
-  username TEXT,
-  password TEXT,
+  username TEXT CHECK (char_length(username) <= 2000),
+  password TEXT CHECK (char_length(password) <= 2000),
   host TEXT CHECK (char_length(host) <= 253),
   service TEXT NOT NULL CHECK (char_length(service) BETWEEN 1 AND 64),
-  tls_version TEXT,
-  http_protocol TEXT,
+  tls_version TEXT CHECK (char_length(tls_version) <= 32),
+  http_protocol TEXT CHECK (char_length(http_protocol) <= 32),
   client_tcp_rtt INTEGER CHECK (client_tcp_rtt >= 0),
   campaign_id BIGINT REFERENCES campaigns(id) ON DELETE SET NULL,
   CONSTRAINT events_country_format CHECK (country IS NULL OR country ~ '^[A-Z]{2}$')

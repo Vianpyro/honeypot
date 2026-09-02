@@ -64,6 +64,14 @@ secret=${keys#*:}
 secret=${secret%%,*}
 
 # base64url, unpadded -> hex, for `openssl -macopt hexkey:`.
+#
+# KNOWN, ACCEPTED: `openssl dgst -macopt hexkey:...` puts the signing key on a
+# command line, where anything able to read /proc on this host sees it for the
+# length of one exec. That is not a leak the API has -- it is this operator
+# script's. The hosts it runs on have one administrator, and the alternative
+# (openssl cannot read a MAC key from a file) is to ship a signing helper, which
+# is more code than the exposure is worth. Do not lift this pattern into
+# anything that runs unattended or on a shared machine.
 b64url_to_hex() {
     v=$(printf '%s' "$1" | tr '_-' '/+')
     # Re-pad: `openssl base64 -d` needs the '=' the unpadded form drops.
