@@ -4,6 +4,20 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+# BOTH BINARIES ARE NAMED EXPLICITLY, and the reason is not tidiness. A bin
+# target is its own crate, and its crate name is what `RUST_LOG` filters on.
+# Left as `src/bin/reporter.rs`, the target was `reporter`, so the documented
+# filter `honeypot_reporter=info` matched nothing and the reporter ran
+# completely silently -- the exact failure mode this project has already paid
+# for once today.
+[[bin]]
+name = "honeypot-api"
+path = "src/main.rs"
+
+[[bin]]
+name = "honeypot-reporter"
+path = "src/bin/reporter.rs"
+
 [dependencies]
 axum = "0.8"
 base64 = "0.23.1"
@@ -13,6 +27,16 @@ hex = "0.4"
 http = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The AbuseIPDB reporter's HTTP client, and the ONLY outbound call anything in
+# this crate makes. `default-features = false` keeps native-tls out of the tree;
+# `rustls-tls-webpki-roots` carries its own root store, so the reporter does not
+# depend on the container's ca-certificates and cannot be surprised by an empty
+# system trust store in a slimmer base image.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "multipart",
+    "rustls-tls-webpki-roots",
+] }
 sha2 = "0.11.0"
 # SQLx 0.9 split the single `runtime-tokio-rustls` feature of 0.7/0.8 into two
 # independent axes: one runtime (`runtime-tokio`) and one TLS backend. The old
