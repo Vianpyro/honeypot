@@ -98,6 +98,11 @@ services:
       # key-id:base64url-secret pairs, comma-separated. Rotation is a second
       # pair here plus a Worker that starts sending the new X-Honeypot-Key-Id.
       HONEYPOT_HMAC_KEYS: ${HONEYPOT_HMAC_KEYS:?HONEYPOT_HMAC_KEYS must be set in .env}
+      # Gates the PRIVATE stats scope, which returns source addresses and
+      # captured credentials. Empty disables that scope entirely -- the public
+      # aggregates still serve, so an unconfigured deployment is degraded
+      # rather than broken, and it fails closed rather than open.
+      HONEYPOT_STATS_TOKEN: ${HONEYPOT_STATS_TOKEN:-}
       HONEYPOT_RETENTION_DAYS: ${HONEYPOT_RETENTION_DAYS:-100}
       HONEYPOT_DB_MAX_CONNECTIONS: ${HONEYPOT_DB_MAX_CONNECTIONS:-16}
       RUST_LOG: ${RUST_LOG:-honeypot_api=info,tower_http=warn}
