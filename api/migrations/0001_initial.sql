@@ -26,14 +26,18 @@ CREATE TABLE IF NOT EXISTS events (
   asn BIGINT CHECK (asn >= 0),
   as_organization TEXT,
   ua TEXT,
-  method TEXT NOT NULL CHECK (method ~ '^[A-Z]+$'),
-  path TEXT NOT NULL CHECK (left(path, 1) = '/'),
+  -- Bounded as well as shaped.  The API validates the same limits and turns a
+  -- violation into a 422, but every field in this table is attacker-supplied
+  -- by design, so the constraint has to hold for ANY writer -- a restore, a
+  -- backfill from D1, a psql session.
+  method TEXT NOT NULL CHECK (method ~ '^[A-Z]{1,16}$'),
+  path TEXT NOT NULL CHECK (left(path, 1) = '/' AND char_length(path) <= 2048),
   query TEXT,
   body TEXT CHECK (char_length(body) <= 2000),
   username TEXT,
   password TEXT,
-  host TEXT,
-  service TEXT NOT NULL,
+  host TEXT CHECK (char_length(host) <= 253),
+  service TEXT NOT NULL CHECK (char_length(service) BETWEEN 1 AND 64),
   tls_version TEXT,
   http_protocol TEXT,
   client_tcp_rtt INTEGER CHECK (client_tcp_rtt >= 0),
@@ -113,6 +117,14 @@ CREATE TABLE IF NOT EXISTS job_runs (
 
 -- Public and private dashboard queries are time-scoped.  Do not index every
 -- captured attribute: daily rollups avoid those broad scans.
+--
+-- The first index below is also what makes RETENTION cheap.  Roughly 100 days
+-- are kept; the sweep is a single
+--     DELETE FROM events WHERE observed_at < now() - make_interval(days => $1)
+-- run daily by the API itself (see retention_task in src/main.rs), and it is a
+-- range scan on this index rather than a sequential scan of the table.
+-- Deliberately NOT partitioned: at this volume monthly partitions would buy a
+-- cheaper DROP and cost a schema that every future query has to reason about.
 CREATE INDEX IF NOT EXISTS idx_events_observed_at_desc
   ON events (observed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_ip_observed_at_desc
