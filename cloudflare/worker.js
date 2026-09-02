@@ -10,6 +10,7 @@ import { simulators } from './simulators.js';
 import { aggregateDay, yesterdayUTC } from './aggregate.js';
 import { reportToAbuseIPDB } from './reporter.js';
 import { ABUSEIPDB_VERIFICATION_TOKEN, HONEYPOT_HOSTS, isMonitoring } from './config.js';
+import { shouldLogEvent } from './logging.js';
 
 // Any non-honeypot host, from a caller on one of these ASNs, also gets trapped
 const DATACENTER_ASNS = new Set([
@@ -267,15 +268,14 @@ export default {
         // ── Log to D1 asynchronously (non-blocking) ───────────────
         const isTest = await safeCompare(request.headers.get('X-Honeypot-Test'), env.ADMIN_SECRET);
 
-        const isVerifiedMonitor =
-            request.cf?.botManagement?.verifiedBot === true ||
-            MONITORING_PATHS.get(url.hostname)?.test(url.pathname);
+        // `isMonitoring()` above already bypasses the known, deployment-specific
+        // monitoring paths.  Keep this check limited to Cloudflare's verified
+        // bots; the former MONITORING_PATHS map was never defined or imported.
+        const isVerifiedMonitor = request.cf?.botManagement?.verifiedBot === true;
 
-        if (!IGNORE_PATHS.includes(url.pathname) && !isTest && !isVerifiedMonitor) {
-            ctx.waitUntil(logEvent(meta, env));
-        }
-
-        if (!IGNORE_PATHS.includes(url.pathname) && !isTest) {
+        // Exactly one asynchronous delivery attempt per eligible request.
+        // Calling waitUntil twice here created two independent event inserts.
+        if (shouldLogEvent(url.pathname, isTest, isVerifiedMonitor)) {
             ctx.waitUntil(logEvent(meta, env));
         }
 
