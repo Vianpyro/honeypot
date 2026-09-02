@@ -74,6 +74,15 @@ checked against a live server at compile time and CI stays reproducible.
 Schema changes go in a NEW numbered file. SQLx records a checksum per migration
 and refuses one that changed after it was applied.
 
+**Adding a migration file does not, on its own, rebuild a binary.** `migrate!`
+embeds the directory at compile time, but Cargo's dependency info from the
+previous build does not mention a file that did not exist then -- so an
+untouched binary keeps the old set and fails at startup with
+`VersionMissing(N)` against a database another binary has already migrated.
+`touch` any source file in the crate, or `cargo clean -p honeypot-api`. The
+Docker build is unaffected: it copies `migrations/` into a layer that the new
+file invalidates.
+
 ## Tests
 
 ```sh

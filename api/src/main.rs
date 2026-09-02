@@ -13,6 +13,7 @@
 //! it is meant to prevent, under two concurrent retries.
 
 mod auth;
+mod campaign;
 
 use std::{env, net::IpAddr, sync::Arc, time::Duration};
 
@@ -333,6 +334,15 @@ async fn ingest(
     // 0.9 only implements the INET codec behind its `ipnet`/`ipnetwork`
     // features, and serde has already parsed this into an `IpAddr`, so the cast
     // cannot fail and the crate does not have to be pulled in for one column.
+    // Kept before the payload is consumed by the binds below: campaign detection
+    // needs them after the insert, and `bind` takes ownership.
+    let (ua, asn, observed_at) = (payload.ua.clone(), payload.asn, payload.observed_at);
+
+    let mut tx = state.db.begin().await.map_err(|error| {
+        error!(%error, "could not open a transaction");
+        ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage unavailable")
+    })?;
+
     let inserted = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO events (
@@ -365,12 +375,33 @@ async fn ingest(
     .bind(payload.body)
     .bind(payload.username)
     .bind(payload.password)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|error| {
         // The event id is safe to log (it is a UUID the Worker minted); the
         // payload is not, and is not logged anywhere.
         error!(%error, event_id = %payload.event_id, "event insert failed");
+        ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage unavailable")
+    })?;
+
+    // CAMPAIGN DETECTION SHARES THE INSERT'S TRANSACTION. A crash between the
+    // two would otherwise leave an event that belongs to a campaign nothing
+    // points at, or a promoted campaign whose pending row still exists -- both
+    // of which the D1 version could produce, and its own comment admitted.
+    //
+    // Only for a row that was actually written: a duplicate has already been
+    // counted, and running detection again would inflate the burst.
+    if let Some(event_id) = inserted {
+        campaign::detect(&mut tx, event_id, ua.as_deref(), asn, observed_at)
+            .await
+            .map_err(|error| {
+                error!(%error, event_id = %payload.event_id, "campaign detection failed");
+                ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage unavailable")
+            })?;
+    }
+
+    tx.commit().await.map_err(|error| {
+        error!(%error, event_id = %payload.event_id, "commit failed");
         ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage unavailable")
     })?;
 
