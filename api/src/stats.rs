@@ -116,7 +116,17 @@ async fn public(db: &PgPool, days: i64) -> Result<Value, sqlx::Error> {
 
     let totals: (Option<i64>, i64, i64, i64) = sqlx::query_as(
         "SELECT
-             (SELECT sum(count) FROM stats_daily
+             -- ::bigint IS NOT DECORATION. `sum(bigint)` returns NUMERIC in
+             -- PostgreSQL, and decoding NUMERIC into an i64 is a runtime type
+             -- error, not a widening -- so this endpoint returned 503 for every
+             -- request the moment there was a single row to add up.
+             --
+             -- It shipped green because a `sum` over NO rows is NULL, and a
+             -- NULL decodes without any type check at all. The tests asserted
+             -- the payload's shape against an empty table, which is exactly the
+             -- one state where the bug is invisible. The test below now plants a
+             -- volume row for that reason.
+             (SELECT sum(count)::bigint FROM stats_daily
               WHERE dim = 'volume' AND day >= current_date - $1::int AND day < current_date),
              (SELECT count(DISTINCT key) FROM stats_daily
               WHERE dim = 'country' AND day >= current_date - $1::int AND day < current_date),
@@ -315,7 +325,25 @@ mod tests {
     #[tokio::test]
     async fn the_public_payload_has_exactly_the_keys_the_dashboard_reads() {
         let Some(db) = pool().await else { return };
+
+        // A VOLUME ROW MUST EXIST FOR THIS TEST TO MEAN ANYTHING, and its
+        // absence is what let a 503 reach production. `sum(bigint)` returns
+        // NUMERIC, which cannot decode into an i64 -- but a sum over no rows is
+        // NULL, and NULL decodes without a type check. Asserting the payload's
+        // shape against an empty table exercised the one state where the bug
+        // cannot appear.
+        sqlx::query(
+            "INSERT INTO stats_daily (day, dim, key, count) VALUES (current_date - 1, 'volume', '', 42)
+             ON CONFLICT (day, dim, key) DO UPDATE SET count = 42",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
         let body = public(&db, 30).await.unwrap();
+        // The total is a number, not a string and not an error: this is the
+        // assertion the missing cast fails.
+        assert!(body["meta"]["total"].as_i64().unwrap() >= 42);
         let object = body.as_object().unwrap();
 
         let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
